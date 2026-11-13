@@ -12,7 +12,14 @@
 #    pragma GCC diagnostic ignored "-Wextra"
 #    pragma GCC diagnostic ignored "-Wpedantic"
 #endif
+#if defined(__clang__)
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wshorten-64-to-32"
+#endif
 #include "signalsmith-stretch/signalsmith-stretch.h"
+#if defined(__clang__)
+#    pragma clang diagnostic pop
+#endif
 #if defined(__GNUC__)
 #    pragma GCC diagnostic pop
 #endif
