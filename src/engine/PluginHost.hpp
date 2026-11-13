@@ -37,6 +37,7 @@ public:
     [[nodiscard]] juce::AudioPluginInstance* instance (int track) noexcept;
     [[nodiscard]] juce::String identifier (int track) const;
     [[nodiscard]] int latency (int track) const noexcept;
+    [[nodiscard]] int maximumLatency() const noexcept;
 
     /// Audio thread. Processes the insert, then delays the track so every track matches the slowest plug-in.
     void processTrack (int track, float* left, float* right, int frames);

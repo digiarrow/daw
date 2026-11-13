@@ -33,6 +33,8 @@ struct PlaybackInfo
     bool testTone = false;
     int deviceGeneration = 0;
     bool structureOverflow = false;
+    float cpu = 0.0f;
+    double latencyMilliseconds = 0.0;
     bool recording = false;
     bool countingIn = false;
     int recordEpoch = 0;
@@ -205,6 +207,8 @@ private:
     std::atomic<std::int32_t> state_ { static_cast<std::int32_t> (TransportState::Stopped) };
     std::atomic<std::uint32_t> peakLeftBits_ { 0 };
     std::atomic<std::uint32_t> peakRightBits_ { 0 };
+    std::atomic<std::uint32_t> cpuBits_ { 0 };
+    std::atomic<int> latencySamples_ { 0 };
     std::atomic<int> metronomeFlag_ { 0 };
     std::atomic<int> testToneFlag_ { 0 };
     std::atomic<int> deviceGeneration_ { 0 };

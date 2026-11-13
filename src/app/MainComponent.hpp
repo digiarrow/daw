@@ -62,6 +62,10 @@ private:
 
     void chooseAudioFile();
     void chooseProjectOpen();
+    void showRecent();
+    void rememberProject (const juce::File& file);
+    void autosave();
+    void restoreAutosave();
     void chooseProjectSave();
     void addAudioFile (const juce::File& file);
     void dropAudioFile (const juce::File& file, const std::string& trackId, double startQuarterNotes);
@@ -126,6 +130,7 @@ private:
     juce::TextButton exportButton_ { "Export WAV" };
     juce::TextButton loadDemoButton_ { "Load Demo" };
     juce::TextButton openButton_ { "Open" };
+    juce::TextButton recentButton_ { "Recent" };
     juce::TextButton saveButton_ { "Save" };
     juce::TextButton arrangementButton_ { "Arrangement" };
     juce::TextButton sessionButton_ { "Session" };
@@ -195,4 +200,5 @@ private:
     float meterLeft_ = 0.0f;
     float meterRight_ = 0.0f;
     int seenDeviceGeneration_ = -1;
+    int autosaveTicks_ = 0;
 };

@@ -150,6 +150,16 @@ int PluginHost::latency (int track) const noexcept
     return binding != nullptr ? binding->latency : 0;
 }
 
+int PluginHost::maximumLatency() const noexcept
+{
+    int maximum = 0;
+
+    for (int track = 0; track < kTracks; ++track)
+        maximum = std::max (maximum, latency (track));
+
+    return maximum;
+}
+
 void PluginHost::beginBlock() noexcept
 {
     int maximum = 0;

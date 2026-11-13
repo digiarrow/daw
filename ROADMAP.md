@@ -20,7 +20,7 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 
 ### Phase 1 status
 
-You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Known issues: groups and sends still have less of a mixer strip than the device rack; autosave and recent projects are not in yet.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Known issues: groups and sends still have less of a mixer strip than the device rack. Autosave writes beside the project every 30 seconds, and Recent lists the last projects. CPU and latency sit on the transport readout. Link and neural stem separation stay skipped.
 
 ## Phase 2 — partial
 

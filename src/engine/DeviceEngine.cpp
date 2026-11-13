@@ -451,6 +451,8 @@ PlaybackInfo DeviceEngine::playbackInfo() const
     info.recordEpoch = recordEpoch_.load (std::memory_order_relaxed);
     info.deviceGeneration = deviceGeneration_.load (std::memory_order_relaxed);
     info.structureOverflow = structureOverflow_.load (std::memory_order_relaxed) != 0;
+    info.cpu = loadFloat (cpuBits_);
+    info.latencyMilliseconds = info.sampleRate > 0 ? 1000.0 * latencySamples_.load (std::memory_order_relaxed) / info.sampleRate : 0.0;
 
     if (auto* device = deviceManager_.getCurrentAudioDevice())
         info.deviceName = device->getName();
@@ -845,6 +847,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
 {
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused (inputChannelData, numInputChannels);
+    const double callbackStarted = juce::Time::getMillisecondCounterHiRes();
 
     for (int channel = 0; channel < numOutputChannels; ++channel)
         if (outputChannelData[channel] != nullptr)
@@ -1103,6 +1106,12 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
 
     storeFloat (peakLeftBits_, peakLeft);
     storeFloat (peakRightBits_, peakRight);
+    const double elapsed = juce::Time::getMillisecondCounterHiRes() - callbackStarted;
+    const double bufferMs = sampleRate_.load (std::memory_order_relaxed) > 0
+                                ? 1000.0 * numSamples / sampleRate_.load (std::memory_order_relaxed)
+                                : 1.0;
+    storeFloat (cpuBits_, static_cast<float> (std::clamp (elapsed / std::max (0.01, bufferMs), 0.0, 4.0)));
+    latencySamples_.store (numSamples + plugins_.maximumLatency(), std::memory_order_relaxed);
     publishInfo();
 }
 

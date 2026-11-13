@@ -26,6 +26,13 @@ juce::String quarterText (double value)
     return juce::String (value, 2);
 }
 
+juce::File studioStateDirectory()
+{
+    auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("WaveformStudio");
+    directory.createDirectory();
+    return directory;
+}
+
 void silenceFocus (juce::Component& component)
 {
     component.setWantsKeyboardFocus (false);
@@ -341,7 +348,7 @@ MainComponent::MainComponent()
     deviceLabel_.setJustificationType (juce::Justification::centredRight);
     deviceLabel_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kDim));
     statusLabel_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kMint));
-    hintLabel_.setText ("Space plays or pauses. Audio clips start on the timeline and play at their recorded speed.", juce::dontSendNotification);
+    hintLabel_.setText ("Space plays. Cmd/Ctrl+S saves, O opens, E exports. R records. Ctrl-click warps, Alt-click comps.", juce::dontSendNotification);
     hintLabel_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kDim));
     hintLabel_.setFont (juce::Font (juce::FontOptions (12.5f)));
     bpmCaption_.setText ("BPM", juce::dontSendNotification);
@@ -690,6 +697,7 @@ MainComponent::MainComponent()
     };
     loadDemoButton_.onClick = [this] { loadDemo(); };
     openButton_.onClick = [this] { chooseProjectOpen(); };
+    recentButton_.onClick = [this] { showRecent(); };
     saveButton_.onClick = [this] { chooseProjectSave(); };
     collectButton_.onClick = [this] { collectProject(); };
     exportButton_.onClick = [this] { exportWav(); };
@@ -729,7 +737,7 @@ MainComponent::MainComponent()
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
              &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
-             &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
+             &loadDemoButton_, &openButton_, &recentButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_, &lfoButton_, &audioToMidiButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &trackViewport_ })
@@ -755,6 +763,7 @@ MainComponent::MainComponent()
     refreshDeviceControls();
     seenDeviceGeneration_ = engine_.deviceGeneration();
     engine_.deviceManager().addChangeListener (this);
+    restoreAutosave();
 
     if (deviceError.isNotEmpty())
         setStatus (deviceError);
@@ -887,6 +896,8 @@ void MainComponent::resized()
     saveButton_.setBounds (trackHeader.removeFromRight (72));
     trackHeader.removeFromRight (6);
     openButton_.setBounds (trackHeader.removeFromRight (72));
+    trackHeader.removeFromRight (4);
+    recentButton_.setBounds (trackHeader.removeFromRight (72));
 
     area.removeFromTop (6);
     statusLabel_.setBounds (area.removeFromTop (20));
@@ -926,6 +937,12 @@ void MainComponent::timerCallback()
     refreshTransportReadout();
     engine_.maintenance();
 
+    if (++autosaveTicks_ >= 30 * 30)
+    {
+        autosaveTicks_ = 0;
+        autosave();
+    }
+
     if (engine_.deviceGeneration() != seenDeviceGeneration_)
     {
         seenDeviceGeneration_ = engine_.deviceGeneration();
@@ -964,6 +981,38 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         || key == juce::KeyPress ('y', command, 0))
     {
         redo();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('s', command, 0))
+    {
+        if (projectFile_.existsAsFile())
+            saveProject (projectFile_);
+        else
+            chooseProjectSave();
+
+        return true;
+    }
+
+    if (key == juce::KeyPress ('o', command, 0))
+    {
+        chooseProjectOpen();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('e', command, 0))
+    {
+        exportWav();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('r', 0, 0))
+    {
+        if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+            if (focused->findParentComponentOfClass<juce::TextEditor>() != nullptr)
+                return false;
+
+        record();
         return true;
     }
 
@@ -1169,7 +1218,9 @@ void MainComponent::refreshTransportReadout()
                                                                 info.tempoBpm,
                                                                 signature);
     positionLabel_.setText (waveform::formatMusical (position), juce::dontSendNotification);
-    timeLabel_.setText (rateKnown ? waveform::formatSeconds (info.positionSamples, info.sampleRate) : juce::String ("--:--.---"),
+    timeLabel_.setText ((rateKnown ? waveform::formatSeconds (info.positionSamples, info.sampleRate) : juce::String ("--:--.---"))
+                            + "   CPU " + juce::String (juce::roundToInt (info.cpu * 100.0f)) + "%"
+                            + "   " + juce::String (info.latencyMilliseconds, 1) + " ms",
                         juce::dontSendNotification);
 
     const auto playing = info.state == waveform::TransportState::Playing;
@@ -1396,6 +1447,79 @@ void MainComponent::dropAudioFile (const juce::File& file, const std::string& tr
     setStatus ("Added " + file.getFileName() + ".");
 }
 
+void MainComponent::rememberProject (const juce::File& file)
+{
+    if (! file.existsAsFile())
+        return;
+
+    auto lines = juce::StringArray::fromLines (studioStateDirectory().getChildFile ("recent.txt").loadFileAsString());
+    lines.removeString (file.getFullPathName());
+    lines.insert (0, file.getFullPathName());
+
+    while (lines.size() > 8)
+        lines.remove (lines.size() - 1);
+
+    studioStateDirectory().getChildFile ("recent.txt").replaceWithText (lines.joinIntoString ("\n"));
+}
+
+void MainComponent::showRecent()
+{
+    juce::PopupMenu menu;
+    const auto lines = juce::StringArray::fromLines (studioStateDirectory().getChildFile ("recent.txt").loadFileAsString());
+    int id = 1;
+
+    for (const auto& line : lines)
+        if (line.isNotEmpty())
+            menu.addItem (id++, line);
+
+    if (menu.getNumItems() == 0)
+    {
+        setStatus ("No recent projects yet.");
+        return;
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&recentButton_), [this, lines] (int result)
+    {
+        if (result <= 0 || result > lines.size())
+            return;
+
+        const auto file = juce::File (lines[result - 1]);
+
+        if (file.existsAsFile())
+            loadProject (file);
+        else
+            setStatus ("That project is no longer there.");
+    });
+}
+
+void MainComponent::autosave()
+{
+    const auto destination = projectFile_.existsAsFile()
+                                 ? projectFile_.getSiblingFile (projectFile_.getFileNameWithoutExtension() + ".autosave.json")
+                                 : studioStateDirectory().getChildFile ("Untitled.autosave.json");
+    destination.replaceWithText (juce::String (waveform::projectToJson (project_)));
+}
+
+void MainComponent::restoreAutosave()
+{
+    const auto untitled = studioStateDirectory().getChildFile ("Untitled.autosave.json");
+
+    if (! untitled.existsAsFile())
+        return;
+
+    std::string error;
+    auto loaded = waveform::projectFromJson (untitled.loadFileAsString().toStdString(), &error);
+
+    if (! loaded.has_value())
+        return;
+
+    project_ = std::move (*loaded);
+    applyModelToControls();
+    rebuildTracks();
+    syncEngine();
+    setStatus ("Restored the autosave.");
+}
+
 void MainComponent::saveProject (const juce::File& file)
 {
     for (int index = 0; index < static_cast<int> (project_.tracks.size()); ++index)
@@ -1438,6 +1562,7 @@ void MainComponent::saveProject (const juce::File& file)
 
     projectFile_ = file;
     syncEngine();
+    rememberProject (file);
     setStatus ("Saved " + file.getFileName());
 }
 
@@ -1461,6 +1586,7 @@ void MainComponent::loadProject (const juce::File& file)
     rebuildTracks();
     syncEngine();
     browser_.setFolder (file.getParentDirectory());
+    rememberProject (file);
     syncPlugins();
     setStatus ("Opened " + file.getFileName());
 }
