@@ -57,8 +57,9 @@ Project
   Track[]  (audio | midi)
     mixer: gain, pan, mute, solo
     synth patch on MIDI tracks
-    Clip    audio: file, start in quarter notes, offset/length in seconds
+    Clip    audio: file, start in quarter notes, offset/length in seconds, fade in/out
             midi:  start, length, notes
+    MIDI effects[]  arpeggiator, chord, scale, pitch, velocity, in front of the instrument
 ```
 
 Edits are `EditCommand` objects on `History` (apply / revert, bounded depth). The UI calls them for tempo, meter, loop, tracks, clips, mixer moves, clip drags, and piano-roll note lists. Transport play / stop is not an edit; it is a command to the audio thread only. A finished recording becomes an `AddMidiClipCommand` or `AddAudioClipCommand`, so the take itself is undoable.
@@ -76,7 +77,7 @@ Each block:
 1. Drain transport commands and the MIDI input queue.
 2. If a count-in is running, play the metronome without moving the arrangement. When it finishes, start the transport and the take.
 3. If playing, advance the clock and mix each contiguous audio segment.
-4. Render MIDI clips through the built-in polysynth, then live notes on the monitored track. Phase comes from each note's onset, so it stays continuous across blocks. Filter state per pitch lives on the audio thread.
+4. Render MIDI clips through the built-in instrument, then live notes on the monitored track. Clip notes are passed through the track's MIDI effects when the graph is built. Live notes run through the same chain on the audio thread, without allocating. Phase comes from each note's onset, so it stays continuous across blocks. Filter state per pitch lives on the audio thread. Audio clips apply an equal-power fade in and fade out; overlapping fades are the crossfade.
 5. Apply track gain, constant-power pan, mute, and solo (mute wins; any solo silences the rest), then master gain.
 6. Add the metronome and test tone.
 7. Hard-clip to [-1, 1] and publish peaks. If a take is open, copy audio input or append MIDI note-ons and note-offs. No allocation.
@@ -89,15 +90,15 @@ The arrangement view and piano roll are message-thread components. They read the
 
 ## Where later work attaches
 
-**Arrangement view.** Done in this slice. Clips draw from their start and length, drag through `MoveClipCommand`, and the ruler seeks with `SeekSamples`. The loop brace edits the same loop the transport already uses. Waveform peaks inside the clip rectangles are still missing; build them in `ClipLibrary` when a file is decoded.
+**Arrangement view.** Clips draw from their start and length, drag through `MoveClipCommand`, and the ruler seeks with `SeekSamples`. Edge drags resize through `ResizeClipCommand`. The top corners set `fadeInSeconds` and `fadeOutSeconds`. Delete uses `RemoveClipCommand`. X splits at the playhead through `SplitClipCommand`. Waveform peaks are the per-column maximum of the decoded file, computed by `waveformPeaks` once per clip file. The loop brace edits the same loop the transport already uses.
 
 **Recording.** Audio input and MIDI input both record into the armed track. The message thread commits the take after `recordEpoch` advances. Punch-in starts at the current playhead once the count-in finishes.
 
-**MIDI and the piano roll.** Notes in a clip are replaced as one `SetMidiNotesCommand`, which covers draw, move, resize, delete, velocity, and quantize. The built-in synth is the instrument. It is not a sampler and it is not a hosted plug-in.
+**MIDI and the piano roll.** Notes in a clip are replaced as one `SetMidiNotesCommand`, which covers draw, move, resize, delete, velocity, and quantize. The instrument is the synth, sampler, FM voice, or drum voice. MIDI effects on the track run before it. `.mid` import and export use a format-0 standard MIDI file at 960 ticks per quarter (`midiClipToSmf` / `midiClipFromSmf`).
 
 **Mixer routing.** `RenderTrack` is one stereo sum into the master. A send is another gain into a bus id, and a bus is another `RenderTrack` processed after its sources. Keep the graph immutable and rebuilt when the routing changes.
 
-**Plug-in hosting.** Add a `TrackProcessor` interface with `prepare` and `process` used after the clip sum and before pan. The JUCE hosting wrappers (VST3, and Audio Units on macOS) implement that interface inside the engine. The document stores the plug-in identifier and state blob in a future file version. Do not put host objects in `waveform_core`. ASIO stays unrelated to plug-in hosting: it is only a Windows device driver, still off unless `WAVEFORM_ENABLE_ASIO` is set.
+**Plug-in hosting.** `PluginHost` scans every format registered on `waveform_juce_options`: VST3 everywhere, and Audio Units when `JUCE_PLUGINHOST_AU` is on (macOS). Up to four inserts are published to the audio thread. The document stores each plug-in's identifier and state. Host objects stay in the engine, not in `waveform_core`. ASIO stays unrelated to plug-in hosting: it is only a Windows device driver, still off unless `WAVEFORM_ENABLE_ASIO` is set.
 
 **Session grid.** Add a `slots` array that references existing clip ids plus a launch mode. The arrangement timeline stays. Launching a slot seeks or retriggers that clip through the same `Transport`. Unknown JSON keys are already ignored, but a real slot model should bump `version` or ship behind an optional key the version-1 reader skips.
 

@@ -23,6 +23,8 @@ struct RenderClip
     double startQuarterNotes = 0.0;
     double offsetSeconds = 0.0;
     double lengthSeconds = 0.0;
+    double fadeInSeconds = 0.0;
+    double fadeOutSeconds = 0.0;
     float gain = 1.0f;
 };
 
@@ -82,6 +84,7 @@ struct RenderTrack
     InstrumentKind instrument = InstrumentKind::Synth;
     std::vector<RenderSamplerZone> zones;
     std::vector<AutomationLane> automation;
+    std::vector<MidiEffect> midiEffects;
     float gain = 1.0f;
     float gainDb = 0.0f;
     float pan = 0.0f;

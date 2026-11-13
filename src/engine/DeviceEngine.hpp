@@ -139,6 +139,7 @@ public:
     [[nodiscard]] AudioFileInfo probeFile (const std::string& utf8Path) const;
 
     PluginHost& plugins() noexcept { return plugins_; }
+    ClipLibrary& library() noexcept { return library_; }
     [[nodiscard]] const PluginHost& plugins() const noexcept { return plugins_; }
 
 private:

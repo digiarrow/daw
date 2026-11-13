@@ -1,6 +1,7 @@
 #include "RenderGraph.hpp"
 
 #include "waveform/effects.hpp"
+#include "waveform/midi_effects.hpp"
 #include "waveform/mix.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/routing.hpp"
@@ -19,11 +20,73 @@ namespace waveform
 namespace
 {
 
+std::vector<RenderMidiNote> effectedNotes (const std::vector<MidiNote>& notes,
+                                           const std::vector<MidiEffect>& effects,
+                                           double lengthQuarterNotes)
+{
+    std::vector<RenderMidiNote> rendered;
+
+    if (notes.empty())
+        return rendered;
+
+    std::vector<MidiNote> input = notes;
+    std::vector<MidiNote> output (std::max<std::size_t> (notes.size() * 4, 16));
+    const int produced = applyMidiEffects (input.data(), static_cast<int> (input.size()),
+                                           effects.data(), static_cast<int> (effects.size()),
+                                           lengthQuarterNotes, output.data(), static_cast<int> (output.size()));
+    rendered.reserve (static_cast<std::size_t> (std::max (0, produced)));
+
+    for (int index = 0; index < produced; ++index)
+    {
+        RenderMidiNote note;
+        note.note = output[static_cast<std::size_t> (index)].note;
+        note.velocity = output[static_cast<std::size_t> (index)].velocity;
+        note.startQuarterNotes = output[static_cast<std::size_t> (index)].startQuarterNotes;
+        note.lengthQuarterNotes = output[static_cast<std::size_t> (index)].lengthQuarterNotes;
+        note.slideSemitones = output[static_cast<std::size_t> (index)].slideSemitones;
+        rendered.push_back (note);
+    }
+
+    return rendered;
+}
+
+} // namespace
+
+namespace
+{
+
 constexpr int kMaxTracks = 64;
 constexpr int kMaxClips = 256;
 constexpr float kMetronomeGain = 0.85f;
 constexpr float kTestToneGain = 0.15f;
 constexpr double kTestToneFrequency = 440.0;
+
+int appendShapedLive (const RenderTrack& track,
+                      const SynthSchedule* synth,
+                      int trackIndex,
+                      double tempoBpm,
+                      SoundingNote* sounding,
+                      int noteCount,
+                      int capacity)
+{
+    if (synth == nullptr || synth->liveTrack != trackIndex || synth->liveNotes == nullptr || synth->liveNoteCount <= 0)
+        return noteCount;
+
+    double oldest = 0.0;
+
+    for (int index = 0; index < synth->liveNoteCount; ++index)
+        oldest = std::min (oldest, synth->liveNotes[index].onsetSeconds);
+
+    SoundingNote shaped[128];
+    const int shapedCount = shapeHeldNotes (synth->liveNotes, synth->liveNoteCount,
+                                            track.midiEffects.data(), static_cast<int> (track.midiEffects.size()),
+                                            -oldest, tempoBpm, shaped, 128);
+
+    for (int index = 0; index < shapedCount && noteCount < capacity; ++index)
+        sounding[noteCount++] = shaped[index];
+
+    return noteCount;
+}
 
 int collectTrackNotes (const RenderTrack& track,
                        int trackIndex,
@@ -122,6 +185,7 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.sampler = track.instrument == InstrumentKind::Sampler;
         rendered.instrument = track.instrument;
         rendered.automation = track.automation;
+        rendered.midiEffects = track.midiEffects;
 
         for (const auto& zone : track.samplerZones)
         {
@@ -198,18 +262,7 @@ GraphBuildResult buildGraph (const Project& project,
                 RenderMidiClip renderedClip;
                 renderedClip.startQuarterNotes = clip->startQuarterNotes;
                 renderedClip.lengthQuarterNotes = clip->lengthQuarterNotes;
-
-                for (const auto& note : clip->notes)
-                {
-                    RenderMidiNote renderedNote;
-                    renderedNote.note = note.note;
-                    renderedNote.velocity = note.velocity;
-                    renderedNote.startQuarterNotes = note.startQuarterNotes;
-                    renderedNote.lengthQuarterNotes = note.lengthQuarterNotes;
-                    renderedNote.slideSemitones = note.slideSemitones;
-                    renderedClip.notes.push_back (renderedNote);
-                }
-
+                renderedClip.notes = effectedNotes (clip->notes, track.midiEffects, clip->lengthQuarterNotes);
                 rendered.midiClips.push_back (std::move (renderedClip));
             }
         }
@@ -244,6 +297,8 @@ GraphBuildResult buildGraph (const Project& project,
                 renderedClip.offsetSeconds = clip->offsetSeconds;
                 renderedClip.lengthSeconds = clip->lengthSeconds;
                 renderedClip.gain = dbToLinear (clip->gainDb);
+                renderedClip.fadeInSeconds = clip->fadeInSeconds;
+                renderedClip.fadeOutSeconds = clip->fadeOutSeconds;
 
                 if (clip->warp.size() >= 2 || ! clip->comp.empty())
                 {
@@ -316,17 +371,7 @@ GraphBuildResult buildGraph (const Project& project,
                 destination.used = true;
                 destination.midi = true;
                 destination.lengthQuarterNotes = midi->lengthQuarterNotes;
-
-                for (const auto& note : midi->notes)
-                {
-                    RenderMidiNote renderedNote;
-                    renderedNote.note = note.note;
-                    renderedNote.velocity = note.velocity;
-                    renderedNote.startQuarterNotes = note.startQuarterNotes;
-                    renderedNote.lengthQuarterNotes = note.lengthQuarterNotes;
-                    renderedNote.slideSemitones = note.slideSemitones;
-                    destination.notes.push_back (renderedNote);
-                }
+                destination.notes = effectedNotes (midi->notes, track.midiEffects, midi->lengthQuarterNotes);
             }
             else if (const auto* audioClip = std::get_if<AudioClip> (&slot.clip))
             {
@@ -538,6 +583,8 @@ void renderLinearBlock (const RenderGraph* graph,
                     view.timelineStartFrame = Timing::samplesFromQuarterNotes (clip.startQuarterNotes, sampleRate, tempoBpm);
                     view.sourceOffsetFrame = std::max<std::int64_t> (0, std::llround (clip.offsetSeconds * clip.audio->sampleRate));
                     view.timelineLengthFrames = std::max<std::int64_t> (0, std::llround (clip.lengthSeconds * clip.audio->sampleRate));
+                    view.fadeInFrames = std::max<std::int64_t> (0, std::llround (clip.fadeInSeconds * sampleRate));
+                    view.fadeOutFrames = std::max<std::int64_t> (0, std::llround (clip.fadeOutSeconds * sampleRate));
                     view.gain = clip.gain;
                 }
             }
@@ -620,9 +667,8 @@ void renderLinearBlock (const RenderGraph* graph,
                                                    sampleRate, tempoBpm, sounding, 128, overflow);
                 const bool arrangement = session == nullptr || index >= sessionCount || session[index].active < 0;
 
-                if (arrangement && synth->liveTrack == index && synth->liveNotes != nullptr)
-                    for (int live = 0; live < synth->liveNoteCount && noteCount < 128; ++live)
-                        sounding[noteCount++] = synth->liveNotes[live];
+                if (arrangement)
+                    noteCount = appendShapedLive (source, synth, index, tempoBpm, sounding, noteCount, 128);
 
                 renderTrackInstrument (source, sounding, noteCount, frames, sampleRate, synth->memories[index],
                                       1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index]);
@@ -720,9 +766,8 @@ void renderLinearBlock (const RenderGraph* graph,
                                            sampleRate, tempoBpm, sounding, 128, overflow);
             const bool arrangement = session == nullptr || trackIndex >= sessionCount || session[trackIndex].active < 0;
 
-            if (arrangement && synth->liveTrack == trackIndex && synth->liveNotes != nullptr)
-                for (int live = 0; live < synth->liveNoteCount && count < 128; ++live)
-                    sounding[count++] = synth->liveNotes[live];
+            if (arrangement)
+                count = appendShapedLive (track, synth, trackIndex, tempoBpm, sounding, count, 128);
 
             const PanGains pan = constantPowerPan (track.pan);
             renderTrackInstrument (track, sounding, count, frames, sampleRate, synth->memories[trackIndex],

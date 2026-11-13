@@ -1,5 +1,7 @@
 #include "waveform/mix.hpp"
 
+#include <cmath>
+
 namespace waveform
 {
 namespace
@@ -27,6 +29,7 @@ void addClip (const AudioClipView& clip,
     const float* sourceLeft = clip.source.left;
     const float* sourceRight = clip.source.right != nullptr ? clip.source.right : sourceLeft;
     const float gain = clip.gain;
+    constexpr float kHalfPi = 1.5707963267948966f;
 
     for (std::int64_t frame = from; frame < to; ++frame)
     {
@@ -35,10 +38,23 @@ void addClip (const AudioClipView& clip,
         if (sourceFrame < 0 || sourceFrame >= clip.source.frames)
             continue;
 
+        const auto position = frame - clip.timelineStartFrame;
+        const auto remaining = clip.timelineLengthFrames - position;
+        float envelope = 1.0f;
+
+        if (clip.fadeInFrames > 0 && position < clip.fadeInFrames)
+            envelope *= std::sin (static_cast<float> (position) / static_cast<float> (clip.fadeInFrames) * kHalfPi);
+
+        if (clip.fadeOutFrames > 0 && remaining < clip.fadeOutFrames)
+        {
+            const float progress = static_cast<float> (clip.fadeOutFrames - remaining) / static_cast<float> (clip.fadeOutFrames);
+            envelope *= std::cos (progress * kHalfPi);
+        }
+
         const auto index = static_cast<int> (frame - timelineStart);
         const auto sourceIndex = static_cast<std::size_t> (sourceFrame);
-        outLeft[index] += sourceLeft[sourceIndex] * gain * leftGain;
-        outRight[index] += sourceRight[sourceIndex] * gain * rightGain;
+        outLeft[index] += sourceLeft[sourceIndex] * gain * leftGain * envelope;
+        outRight[index] += sourceRight[sourceIndex] * gain * rightGain * envelope;
     }
 }
 

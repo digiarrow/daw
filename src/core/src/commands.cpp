@@ -1,8 +1,10 @@
 #include "waveform/commands.hpp"
+#include "waveform/clips.hpp"
 #include "waveform/routing.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <utility>
 
 namespace waveform
@@ -1281,5 +1283,170 @@ void AddSamplerZoneCommand::revert (Project& project)
 }
 
 const char* AddSamplerZoneCommand::name() const { return "Sampler Zone"; }
+
+SplitClipCommand::SplitClipCommand (std::string trackId, std::string clipId, double splitQuarter, double bpm)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), splitQuarter_ (splitQuarter), bpm_ (bpm > 0.0 ? bpm : 120.0)
+{
+}
+
+void SplitClipCommand::apply (Project& project)
+{
+    applied_ = false;
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    const auto it = std::find_if (track->clips.begin(), track->clips.end(),
+                                  [&] (const Clip& clip) { return waveform::clipId (clip) == clipId_; });
+
+    if (it == track->clips.end())
+        return;
+
+    Clip left;
+    Clip right { AudioClip {} };
+
+    if (! splitClip (*it, splitQuarter_, bpm_, left, right))
+        return;
+
+    original_ = *it;
+    rightId_ = waveform::clipId (right);
+    *it = std::move (left);
+    track->clips.insert (std::next (it), std::move (right));
+    applied_ = true;
+}
+
+void SplitClipCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    eraseClip (*track, rightId_);
+
+    for (auto& clip : track->clips)
+        if (waveform::clipId (clip) == clipId_)
+            clip = original_;
+}
+
+const char* SplitClipCommand::name() const { return "Split Clip"; }
+
+ResizeClipCommand::ResizeClipCommand (std::string trackId, std::string clipId, double newStartQuarter, double newLengthQuarters, double bpm)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), newStart_ (newStartQuarter), newLength_ (newLengthQuarters), bpm_ (bpm > 0.0 ? bpm : 120.0)
+{
+}
+
+void ResizeClipCommand::apply (Project& project)
+{
+    applied_ = false;
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    for (auto& clip : track->clips)
+    {
+        if (waveform::clipId (clip) != clipId_)
+            continue;
+
+        original_ = clip;
+        applied_ = resizeClip (clip, newStart_, newLength_, bpm_);
+
+        if (! applied_)
+            clip = original_;
+
+        return;
+    }
+}
+
+void ResizeClipCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        for (auto& clip : track->clips)
+            if (waveform::clipId (clip) == clipId_)
+                clip = original_;
+}
+
+const char* ResizeClipCommand::name() const { return "Resize Clip"; }
+
+SetClipFadesCommand::SetClipFadesCommand (std::string trackId, std::string clipId, double fadeInSeconds, double fadeOutSeconds)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), fadeIn_ (std::max (0.0, fadeInSeconds)), fadeOut_ (std::max (0.0, fadeOutSeconds))
+{
+}
+
+void SetClipFadesCommand::apply (Project& project)
+{
+    applied_ = false;
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    for (auto& clip : track->clips)
+    {
+        auto* audio = std::get_if<AudioClip> (&clip);
+
+        if (audio == nullptr || audio->id != clipId_)
+            continue;
+
+        previousIn_ = audio->fadeInSeconds;
+        previousOut_ = audio->fadeOutSeconds;
+        audio->fadeInSeconds = fadeIn_;
+        audio->fadeOutSeconds = fadeOut_;
+        applied_ = true;
+        return;
+    }
+}
+
+void SetClipFadesCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        for (auto& clip : track->clips)
+            if (auto* audio = std::get_if<AudioClip> (&clip); audio != nullptr && audio->id == clipId_)
+            {
+                audio->fadeInSeconds = previousIn_;
+                audio->fadeOutSeconds = previousOut_;
+            }
+}
+
+const char* SetClipFadesCommand::name() const { return "Clip Fades"; }
+
+SetMidiEffectsCommand::SetMidiEffectsCommand (std::string trackId, std::vector<MidiEffect> effects)
+    : trackId_ (std::move (trackId)), next_ (std::move (effects))
+{
+}
+
+void SetMidiEffectsCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->midiEffects;
+    track->midiEffects = next_;
+}
+
+void SetMidiEffectsCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        track->midiEffects = previous_;
+}
+
+const char* SetMidiEffectsCommand::name() const { return "MIDI Effects"; }
 
 } // namespace waveform

@@ -92,7 +92,7 @@ target_compile_definitions(waveform_juce_options INTERFACE
     JUCE_ASIO=$<BOOL:${WAVEFORM_ENABLE_ASIO}>
     JUCE_PLUGINHOST_VST3=1
     JUCE_PLUGINHOST_VST=0
-    JUCE_PLUGINHOST_AU=0
+    JUCE_PLUGINHOST_AU=$<BOOL:$<PLATFORM_ID:Darwin>>
     JUCE_PLUGINHOST_LADSPA=0
     JUCE_PLUGINHOST_LV2=0
 )
@@ -112,8 +112,11 @@ endif()
 
 add_library(waveform_core STATIC
     src/core/src/automation.cpp
+    src/core/src/clips.cpp
     src/core/src/collect.cpp
     src/core/src/commands.cpp
+    src/core/src/midi_effects.cpp
+    src/core/src/midi_file.cpp
     src/core/src/later.cpp
     src/core/src/sampler.cpp
     src/core/src/session.cpp
@@ -137,6 +140,10 @@ target_include_directories(waveform_core PRIVATE
 )
 target_link_libraries(waveform_core PUBLIC nlohmann_json::nlohmann_json)
 target_compile_features(waveform_core PUBLIC cxx_std_20)
+
+if(APPLE)
+    target_compile_definitions(waveform_core PUBLIC WAVEFORM_HOST_AU=1)
+endif()
 
 if(MSVC)
     target_compile_options(waveform_core PRIVATE /W4)
@@ -164,6 +171,11 @@ target_link_libraries(waveform_engine
 )
 target_compile_features(waveform_engine PUBLIC cxx_std_20)
 
+if(APPLE)
+    # Audio Unit hosting references AUGenericView, which lives in these frameworks.
+    target_link_libraries(waveform_engine PUBLIC "-framework AudioUnit" "-framework CoreAudioKit")
+endif()
+
 function(waveform_set_output_dirs target)
     # Single-config generators write straight into bin/.
     # Visual Studio and Xcode append the configuration name themselves.
@@ -186,6 +198,7 @@ target_sources(WaveformStudio PRIVATE
     src/app/BrowserPanel.cpp
     src/app/DeviceStrip.cpp
     src/app/Main.cpp
+    src/app/MidiEffectBar.cpp
     src/app/MixerView.cpp
     src/app/MainComponent.cpp
     src/app/PianoRoll.cpp
@@ -216,8 +229,12 @@ waveform_set_output_dirs(waveform-render)
 
 if(WAVEFORM_BUILD_TESTS)
     add_executable(waveform_tests
+        tests/test_clips.cpp
         tests/test_effects.cpp
         tests/test_later.cpp
+        tests/test_midi_effects.cpp
+        tests/test_midi_file.cpp
+        tests/test_plugins.cpp
         tests/test_sampler.cpp
         tests/test_session.cpp
         tests/test_stretch.cpp

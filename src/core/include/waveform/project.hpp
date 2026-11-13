@@ -79,6 +79,8 @@ struct AudioClip
     double offsetSeconds = 0.0;
     double lengthSeconds = 0.0;
     double gainDb = 0.0;
+    double fadeInSeconds = 0.0;
+    double fadeOutSeconds = 0.0;
     std::vector<WarpMarker> warp;
     std::vector<CompSegment> comp;
     std::vector<ClipTake> takes;
@@ -182,6 +184,44 @@ struct PluginInsert
     std::string state;
 };
 
+enum class MidiEffectKind
+{
+    Arpeggiator,
+    Chord,
+    Scale,
+    Pitch,
+    Velocity
+};
+
+enum class ScaleKind
+{
+    Major,
+    NaturalMinor,
+    Pentatonic
+};
+
+enum class ChordKind
+{
+    Major,
+    Minor,
+    Power
+};
+
+/// One MIDI processor in front of the instrument.
+struct MidiEffect
+{
+    MidiEffectKind kind = MidiEffectKind::Pitch;
+    bool enabled = true;
+    int division = 16;
+    int octaves = 1;
+    ChordKind chord = ChordKind::Major;
+    ScaleKind scale = ScaleKind::Major;
+    int root = 0;
+    int semitones = 0;
+    int velocityAdd = 0;
+    double velocityScale = 1.0;
+};
+
 struct Track
 {
     std::string id;
@@ -205,6 +245,7 @@ struct Track
     std::string pluginName;
     std::string pluginState;
     std::vector<PluginInsert> plugins;
+    std::vector<MidiEffect> midiEffects; ///< Processors in front of the instrument. MIDI tracks only.
 };
 
 struct Project
