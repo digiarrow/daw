@@ -1744,15 +1744,86 @@ void MainComponent::exportWav()
         return;
     }
 
-    const auto destination = projectFile_.getParentDirectory().getChildFile (projectFile_.getFileNameWithoutExtension() + ".wav");
-    waveform::OfflineRenderRequest request;
-    request.projectPath = projectFile_.getFullPathName().toStdString();
-    request.outputPath = destination.getFullPathName().toStdString();
-    request.seconds = 8.0;
-    request.sampleRate = engine_.currentSampleRate() > 0.0 ? engine_.currentSampleRate() : 48000.0;
-    request.metronome = metronomeButton_.getToggleState();
-    const auto rendered = waveform::renderProjectFile (request);
-    setStatus (rendered.ok ? "Exported " + destination.getFileName() : juce::String (rendered.message));
+    auto* dialog = new juce::Component();
+    auto* range = new juce::ComboBox();
+    auto* rate = new juce::ComboBox();
+    auto* depth = new juce::ComboBox();
+    auto* stems = new juce::ToggleButton ("Separate stem for each track");
+    auto* go = new juce::TextButton ("Export");
+    range->addItem ("Whole song", 1);
+    range->addItem ("Loop", 2);
+    range->setSelectedId (1);
+    rate->addItem ("44100", 1);
+    rate->addItem ("48000", 2);
+    rate->addItem ("96000", 3);
+    rate->setSelectedId (2);
+    depth->addItem ("16-bit", 1);
+    depth->addItem ("24-bit", 2);
+    depth->addItem ("32-bit float", 3);
+    depth->setSelectedId (1);
+    dialog->addAndMakeVisible (range);
+    dialog->addAndMakeVisible (rate);
+    dialog->addAndMakeVisible (depth);
+    dialog->addAndMakeVisible (stems);
+    dialog->addAndMakeVisible (go);
+    dialog->setSize (360, 180);
+    range->setBounds (16, 16, 328, 28);
+    rate->setBounds (16, 52, 156, 28);
+    depth->setBounds (184, 52, 160, 28);
+    stems->setBounds (16, 88, 328, 28);
+    go->setBounds (16, 128, 120, 28);
+
+    auto* window = new juce::DocumentWindow ("Export WAV", juce::Colour (waveform::StudioLookAndFeel::kPanel), juce::DocumentWindow::closeButton);
+    window->setContentOwned (dialog, true);
+    window->setUsingNativeTitleBar (true);
+    window->centreWithSize (380, 220);
+    window->setVisible (true);
+    go->onClick = [this, window, range, rate, depth, stems]
+    {
+        saveProject (projectFile_);
+        const double tempo = std::max (1.0, project_.tempoBpm);
+        double startQuarter = 0.0;
+        double endQuarter = 8.0;
+
+        for (const auto& track : project_.tracks)
+            for (const auto& clip : track.clips)
+            {
+                if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
+                {
+                    double end = audio->startQuarterNotes + audio->lengthSeconds * tempo / 60.0;
+
+                    for (const auto& marker : audio->warp)
+                        end = std::max (end, audio->startQuarterNotes + marker.timelineQuarters);
+
+                    endQuarter = std::max (endQuarter, end);
+                }
+                else if (const auto* midi = std::get_if<waveform::MidiClip> (&clip))
+                    endQuarter = std::max (endQuarter, midi->startQuarterNotes + midi->lengthQuarterNotes);
+            }
+
+        if (range->getSelectedId() == 2)
+        {
+            startQuarter = project_.loopStartQuarterNotes;
+            endQuarter = std::max (startQuarter + 0.25, project_.loopEndQuarterNotes);
+        }
+
+        waveform::OfflineRenderRequest request;
+        request.projectPath = projectFile_.getFullPathName().toStdString();
+        request.outputPath = projectFile_.getSiblingFile (projectFile_.getFileNameWithoutExtension() + ".wav").getFullPathName().toStdString();
+        request.startSeconds = startQuarter * 60.0 / tempo;
+        request.seconds = std::max (0.25, (endQuarter - startQuarter) * 60.0 / tempo);
+        request.sampleRate = rate->getText().getDoubleValue();
+        request.bitsPerSample = depth->getSelectedId() == 2 ? 24 : 16;
+        request.floatSamples = depth->getSelectedId() == 3;
+        request.stems = stems->getToggleState();
+        request.plugins = &engine_.plugins();
+        const auto rendered = waveform::renderProjectFile (request);
+        const double deviceRate = engine_.currentSampleRate() > 0.0 ? engine_.currentSampleRate() : 48000.0;
+        engine_.plugins().prepare (deviceRate, std::max (64, engine_.playbackInfo().bufferSize));
+        setStatus (rendered.ok ? juce::String (rendered.message) : juce::String (rendered.message));
+        juce::MessageManager::callAsync ([this] { exportWindow_.reset(); });
+    };
+    exportWindow_.reset (window);
 }
 
 void MainComponent::syncPlugins()

@@ -162,6 +162,7 @@ private:
     std::unique_ptr<juce::DocumentWindow> pluginWindow_;
     std::unique_ptr<juce::DocumentWindow> scriptWindow_;
     std::unique_ptr<juce::DocumentWindow> rackWindow_;
+    std::unique_ptr<juce::DocumentWindow> exportWindow_;
     std::unique_ptr<juce::DocumentWindow> midiMapWindow_;
     std::vector<waveform::ControlMapping> controlMap_;
     bool learningControl_ = false;

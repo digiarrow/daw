@@ -11,9 +11,14 @@ struct OfflineRenderRequest
     std::string projectPath;
     std::string outputPath;
     double sampleRate = 48000.0;
+    double startSeconds = 0.0;
     double seconds = 4.0;
+    int bitsPerSample = 16;
+    bool floatSamples = false;
+    bool stems = false;
     bool metronome = false;
     bool testTone = false;
+    class PluginHost* plugins = nullptr;
 };
 
 struct OfflineRenderResult

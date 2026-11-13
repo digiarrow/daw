@@ -15,12 +15,12 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 - [done] Sampler, FM, and drum. The instrument menu on a MIDI track chooses synth, sampler, FM, or drum. Dropping a browser file on a MIDI track adds a sampler zone rooted at C4.
 - [done] Automation. **Volume lane** draws mixer gain for the selected track. Click adds a point, drag moves it, right-click deletes it. The value is applied per audio block.
 - [done] Session clip grid. **Session** switches with **Arrangement**. Double-click an empty slot to create a clip, click to launch, the scene number launches the row, and **Arrangement** on a column returns that track to the timeline. Launch timing is immediate, next beat, or next bar. A launched clip loops and replaces arrangement clips on that track. Right-click clears a slot. MIDI slots edit in the piano roll.
-- [done] Browser, save-and-collect, WAV export. The browser lists audio files in a folder. Drag a file onto an arrangement lane or a track row to place it. **Folder** changes the directory. **Collect** copies media into `Media/`. **Export WAV** bounces 8 seconds.
+- [done] Browser, save-and-collect, WAV export. **Export WAV** chooses the loop or the whole song, 44.1/48/96 kHz, 16-bit, 24-bit, or 32-bit float, includes hosted plug-ins, and can write one file per track. **Collect** copies media into `Media/`.
 - [done] VST3 hosting and plugin delay compensation. **Plug-in** scans the platform VST3 folders, loads one insert on the selected track, and opens its editor (or a generic editor). Other tracks are delayed by `compensateDelay` so they line up with the plug-in's reported latency. The identifier and state are stored in the project. Offline WAV export does not run hosted plug-ins.
 
 ### Phase 1 status
 
-You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Known issues: export is a fixed 8 seconds and does not include hosted plug-ins; other built-in inserts besides delay and chorus are not in the toolbar; warp markers are stored and drawn but playback is still at the file's natural speed.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Known issues: groups and sends are edited from the engine API more than from a mixer strip; MPE, LFOs, and audio-to-MIDI are not buttons yet.
 
 ## Phase 2 — partial
 

@@ -1,4 +1,5 @@
 #include "OfflineRenderer.hpp"
+#include "PluginHost.hpp"
 
 #include "RenderGraph.hpp"
 #include "waveform/paths.hpp"
@@ -39,8 +40,73 @@ int countAudioClips (const Project& project)
 
 } // namespace
 
+OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request);
+
+namespace
+{
+
+std::string stemPath (const std::string& output, const std::string& name)
+{
+    const auto file = juce::File (juce::String::fromUTF8 (output.data(), static_cast<int> (output.size())));
+    auto safe = juce::String (name);
+    safe = safe.replaceCharacter ('/', '-').replaceCharacter ('\\', '-');
+    return file.getSiblingFile (file.getFileNameWithoutExtension() + "-" + safe + ".wav").getFullPathName().toStdString();
+}
+
+} // namespace
+
 OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
 {
+    if (request.stems)
+    {
+        OfflineRenderResult result;
+        const auto projectFile = fileFromUtf8 (request.projectPath);
+        std::string error;
+        auto project = projectFromJson (projectFile.loadFileAsString().toStdString(), &error);
+
+        if (! project.has_value())
+        {
+            result.message = error.empty() ? "could not read project" : error;
+            return result;
+        }
+
+        int written = 0;
+
+        for (std::size_t index = 0; index < project->tracks.size(); ++index)
+        {
+            if (project->tracks[index].group)
+                continue;
+
+            Project stemProject = *project;
+
+            for (auto& track : stemProject.tracks)
+            {
+                track.mixer.solo = false;
+                track.mixer.mute = false;
+            }
+
+            stemProject.tracks[index].mixer.solo = true;
+            const auto temp = projectFile.getSiblingFile (".waveform-stem.json");
+            temp.replaceWithText (juce::String (projectToJson (stemProject)));
+            OfflineRenderRequest one = request;
+            one.stems = false;
+            one.projectPath = temp.getFullPathName().toStdString();
+            one.outputPath = stemPath (request.outputPath, project->tracks[index].name);
+            const auto rendered = renderProjectFile (one);
+            temp.deleteFile();
+
+            if (! rendered.ok && rendered.exitCode != 4)
+                return rendered;
+
+            ++written;
+        }
+
+        result.ok = written > 0;
+        result.exitCode = result.ok ? 0 : 4;
+        result.message = "wrote " + std::to_string (written) + " stem(s)";
+        return result;
+    }
+
     OfflineRenderResult result;
 
     if (! Timing::isValidSampleRate (request.sampleRate) || ! (request.seconds > 0.0))
@@ -84,8 +150,15 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
     constexpr int kBlock = 256;
     std::vector<float> routeStorage (static_cast<std::size_t> ((kMaxRouteTracks + kMaxBuses) * 2 * kBlock));
     auto effectArena = std::make_unique<EffectState[]> (static_cast<std::size_t> (kMaxRouteTracks * kMaxInserts));
+    auto rackStates = std::make_unique<EffectState[]> (static_cast<std::size_t> (8 * 4 * kMaxInserts));
+    std::vector<float> rackScratch (static_cast<std::size_t> (kBlock * 4));
     BlockScratch scratch;
     bindBlockScratch (scratch, routeStorage.data(), kBlock, effectArena.get());
+    scratch.rackScratchLeft = rackScratch.data();
+    scratch.rackScratchRight = rackScratch.data() + kBlock;
+    scratch.rackOutLeft = rackScratch.data() + kBlock * 2;
+    scratch.rackOutRight = rackScratch.data() + kBlock * 3;
+    scratch.rackStates = rackStates.get();
     std::vector<SynthVoiceMemory> synthMemory (std::max<std::size_t> (1, built.graph->tracks.size()));
     SynthSchedule schedule;
     schedule.memories = synthMemory.data();
@@ -97,7 +170,12 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
     transport.setTimeSignature (project->timeSignature);
     transport.setLoopQuarterNotes (project->loopStartQuarterNotes, project->loopEndQuarterNotes);
     transport.setLoopEnabled (project->loopEnabled);
+    transport.setLoopEnabled (false);
+    transport.seekSamples (static_cast<std::int64_t> (std::llround (std::max (0.0, request.startSeconds) * request.sampleRate)));
     transport.play();
+
+    if (request.plugins != nullptr)
+        request.plugins->prepare (request.sampleRate, kBlock);
 
     const auto totalFrames = std::llround (request.seconds * request.sampleRate);
     std::vector<float> left (kBlock);
@@ -122,8 +200,9 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
     const auto options = juce::AudioFormatWriterOptions {}
                              .withSampleRate (request.sampleRate)
                              .withNumChannels (2)
-                             .withBitsPerSample (16)
-                             .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::integral);
+                             .withBitsPerSample (request.floatSamples ? 32 : request.bitsPerSample)
+                             .withSampleFormat (request.floatSamples ? juce::AudioFormatWriterOptions::SampleFormat::floatingPoint
+                                                                     : juce::AudioFormatWriterOptions::SampleFormat::integral);
     auto writer = format.createWriterFor (stream, options);
 
     if (writer == nullptr)
@@ -140,12 +219,23 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
         const int frames = static_cast<int> (std::min<std::int64_t> (kBlock, totalFrames - rendered));
         int offset = 0;
 
+        if (request.plugins != nullptr)
+            request.plugins->beginBlock();
+
+        ExternalInsert external;
+        external.process = [] (void* context, int track, float* outLeft, float* outRight, int count)
+        {
+            static_cast<PluginHost*> (context)->processTrack (track, outLeft, outRight, count);
+        };
+        external.context = request.plugins;
+
         transport.advance (frames, [&] (std::int64_t start, int count)
         {
             renderLinearBlock (built.graph.get(), request.sampleRate, transport.tempoBpm(),
                                transport.timeSignature(), start, count,
                                left.data() + offset, right.data() + offset,
-                               request.metronome, false, nullptr, nullptr, &schedule, &scratch);
+                               request.metronome, false, nullptr, nullptr, &schedule, &scratch,
+                               nullptr, 0, request.plugins != nullptr ? &external : nullptr);
             offset += count;
         });
 
