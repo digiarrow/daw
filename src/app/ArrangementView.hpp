@@ -7,7 +7,8 @@
 #include <functional>
 #include <string>
 
-class ArrangementView : public juce::Component
+class ArrangementView : public juce::Component,
+                          public juce::DragAndDropTarget
 {
 public:
     void setState (const waveform::Project* project,
@@ -21,6 +22,10 @@ public:
     std::function<void (const std::string& trackId, double startQuarterNotes)> onCreateMidiClip;
     std::function<void (double quarterNotes)> onSeek;
     std::function<void (bool enabled, double startQuarterNotes, double endQuarterNotes)> onLoopEdit;
+    std::function<void (const std::string& path, const std::string& trackId, double startQuarterNotes)> onDropFile;
+
+    bool isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& details) override;
+    void itemDropped (const juce::DragAndDropTarget::SourceDetails& details) override;
 
     void paint (juce::Graphics& graphics) override;
     void mouseDown (const juce::MouseEvent& event) override;

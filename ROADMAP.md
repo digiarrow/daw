@@ -15,7 +15,7 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 - [partial] Sampler. Zones render at the played pitch when a track's instrument is `sampler`.
 - [partial] Automation. A `mixer.gainDb` lane is applied per block. Lanes round-trip in the project file.
 - [done] Session clip grid. **Session** switches with **Arrangement**. Double-click an empty slot to create a clip, click to launch, the scene number launches the row, and **Arrangement** on a column returns that track to the timeline. Launch timing is immediate, next beat, or next bar. A launched clip loops and replaces arrangement clips on that track. Right-click clears a slot. MIDI slots edit in the piano roll.
-- [partial] Collect and WAV export. **Collect** fills `Media/`. **Export WAV** bounces 8 seconds. There is no browser pane.
+- [done] Browser, save-and-collect, WAV export. The browser lists audio files in a folder. Drag a file onto an arrangement lane or a track row to place it. **Folder** changes the directory. **Collect** copies media into `Media/`. **Export WAV** bounces 8 seconds.
 - [partial] Plugin delay compensation. `compensateDelay` is the delay line. A VST3 plugin is not loaded in the audio callback yet.
 - [skipped for this increment] In-window VST3 browser. JUCE can host VST3; wiring a scanner into the callback is the remaining step, and it was not finished here.
 

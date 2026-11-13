@@ -108,6 +108,27 @@ ArrangementView::Hit ArrangementView::findHit (juce::Point<int> position) const
     return hit;
 }
 
+bool ArrangementView::isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    return details.description.isString() && project_ != nullptr;
+}
+
+void ArrangementView::itemDropped (const juce::DragAndDropTarget::SourceDetails& details)
+{
+    if (project_ == nullptr || ! onDropFile)
+        return;
+
+    const auto hit = findHit (details.localPosition);
+
+    if (hit.trackIndex < 0 || hit.trackIndex >= static_cast<int> (project_->tracks.size()))
+        return;
+
+    const auto start = std::max (0.0, snapped (quarterAt (details.localPosition.x)));
+    onDropFile (details.description.toString().toStdString(),
+                project_->tracks[static_cast<std::size_t> (hit.trackIndex)].id,
+                start);
+}
+
 void ArrangementView::paint (juce::Graphics& graphics)
 {
     graphics.fillAll (juce::Colour (waveform::StudioLookAndFeel::kBackground));

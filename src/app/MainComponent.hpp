@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ArrangementView.hpp"
+#include "BrowserPanel.hpp"
 #include "DeviceEngine.hpp"
 #include "PianoRoll.hpp"
 #include "SessionView.hpp"
@@ -16,6 +17,7 @@
 #include <vector>
 
 class MainComponent : public juce::Component,
+                      public juce::DragAndDropContainer,
                       private juce::Timer,
                       private juce::Slider::Listener,
                       private juce::ChangeListener
@@ -59,6 +61,7 @@ private:
     void chooseProjectOpen();
     void chooseProjectSave();
     void addAudioFile (const juce::File& file);
+    void dropAudioFile (const juce::File& file, const std::string& trackId, double startQuarterNotes);
     void saveProject (const juce::File& file);
     void loadProject (const juce::File& file);
     void loadDemo();
@@ -129,6 +132,7 @@ private:
     juce::ComboBox midiInputBox_;
     juce::ComboBox launchBox_;
 
+    BrowserPanel browser_;
     ArrangementView arrangement_;
     SessionView session_;
     PianoRoll pianoRoll_;

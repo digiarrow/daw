@@ -17,6 +17,7 @@ What this slice does:
 - Audio recording from the device input onto an audio track.
 - Track inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator), group buses, and two sends. **Add Delay** and **Make Group** are on the track toolbar.
 - **Session** switches the timeline for a clip grid. Double-click a slot to create a clip, click to launch it on the beat, the bar, or immediately. A scene number launches the whole row.
+- The browser lists audio files. Drag one onto an arrangement lane or a track row. **Folder** picks a different directory.
 
 There is still no time-stretch and no plug-in hosting. The synth is the built-in instrument, not a hosted plug-in.
 

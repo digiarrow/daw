@@ -52,7 +52,8 @@ public:
 } // namespace
 
 class MainComponent::TrackRow : public juce::Component,
-                                private juce::Slider::Listener
+                                private juce::Slider::Listener,
+                                public juce::DragAndDropTarget
 {
 public:
     TrackRow (waveform::Track& track, bool selected)
@@ -117,6 +118,18 @@ public:
     std::function<void (waveform::MixerState)> onPreview;
     std::function<void (waveform::MixerState, waveform::MixerState)> onCommit;
     std::function<void (waveform::MixerState)> onImmediate;
+    std::function<void (const juce::String& path)> onDropFile;
+
+    bool isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& details) override
+    {
+        return details.description.isString();
+    }
+
+    void itemDropped (const juce::DragAndDropTarget::SourceDetails& details) override
+    {
+        if (onDropFile)
+            onDropFile (details.description.toString());
+    }
 
     void paint (juce::Graphics& graphics) override
     {
@@ -292,6 +305,22 @@ MainComponent::MainComponent()
     arrangement_.onMoveClip = [this] (const std::string& trackId, const std::string& clipId, double start) { moveClip (trackId, clipId, start); };
     arrangement_.onCreateMidiClip = [this] (const std::string& trackId, double start) { createMidiClip (trackId, start); };
     arrangement_.onSeek = [this] (double quarter) { engine_.seekQuarterNotes (quarter); };
+    arrangement_.onDropFile = [this] (const std::string& path, const std::string& trackId, double start)
+    {
+        dropAudioFile (juce::File (path), trackId, start);
+    };
+    browser_.onChooseFolder = [this]
+    {
+        fileChooser_ = std::make_unique<juce::FileChooser> ("Browser folder", browser_.folder());
+        fileChooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                   [this] (const juce::FileChooser& chooser)
+                                   {
+                                       const auto folder = chooser.getResult();
+
+                                       if (folder.isDirectory())
+                                           browser_.setFolder (folder);
+                                   });
+    };
     arrangement_.onLoopEdit = [this] (bool enabled, double start, double end)
     {
         history_.execute (project_, std::make_unique<waveform::SetLoopCommand> (enabled, start, end));
@@ -478,7 +507,7 @@ MainComponent::MainComponent()
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &launchBox_, &arrangementButton_, &sessionButton_,
-             &arrangement_, &session_, &pianoRoll_, &trackViewport_ })
+             &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
     {
         addAndMakeVisible (component);
         silenceFocus (*component);
@@ -490,6 +519,9 @@ MainComponent::MainComponent()
     trackViewport_.setViewedComponent (&trackList_, false);
     trackViewport_.setScrollBarsShown (true, false);
 
+#if defined (WAVEFORM_EXAMPLES_DIR)
+    browser_.setFolder (juce::File (WAVEFORM_EXAMPLES_DIR));
+#endif
     project_ = waveform::Project::makeDefault();
     selectedTrackId_ = project_.tracks.empty() ? std::string {} : project_.tracks.front().id;
     const auto deviceError = engine_.initialise();
@@ -631,6 +663,8 @@ void MainComponent::resized()
     arrangement_.setBounds (timeline);
     session_.setBounds (timeline);
     area.removeFromTop (8);
+    browser_.setBounds (area.removeFromLeft (220));
+    area.removeFromLeft (8);
     trackViewport_.setBounds (area);
 
     auto master = masterBounds_.reduced (12, 10);
@@ -834,6 +868,10 @@ void MainComponent::rebuildTracks()
             history_.execute (project_, std::make_unique<waveform::SetMixerCommand> (id, mixer));
             syncEngine();
             refreshHistoryButtons();
+        };
+        row->onDropFile = [this, id] (const juce::String& path)
+        {
+            dropAudioFile (juce::File (path), id, 0.0);
         };
 
         trackList_.addAndMakeVisible (row.get());
@@ -1052,6 +1090,14 @@ void MainComponent::chooseProjectSave()
 
 void MainComponent::addAudioFile (const juce::File& file)
 {
+    const auto playback = engine_.playbackInfo();
+    const double rate = playback.sampleRate > 0 ? playback.sampleRate : 48000.0;
+    const double start = waveform::Timing::quarterNotesFromSamples (playback.positionSamples, rate, playback.tempoBpm);
+    dropAudioFile (file, {}, start);
+}
+
+void MainComponent::dropAudioFile (const juce::File& file, const std::string& trackId, double startQuarterNotes)
+{
     const auto path = file.getFullPathName().toStdString();
     const auto info = engine_.probeFile (path);
 
@@ -1061,24 +1107,30 @@ void MainComponent::addAudioFile (const juce::File& file)
         return;
     }
 
-    const auto trackId = ensureAudioTrack();
+    std::string destination = trackId;
+
+    if (destination.empty())
+        destination = ensureAudioTrack();
+
+    if (const auto* track = waveform::findTrack (project_, destination); track != nullptr && track->type != waveform::TrackType::Audio)
+    {
+        setStatus ("Drop audio onto an audio track.");
+        return;
+    }
+
     waveform::AudioClip clip;
     clip.name = file.getFileNameWithoutExtension().toStdString();
     clip.file = path;
     clip.lengthSeconds = info.seconds;
     clip.offsetSeconds = 0.0;
+    clip.startQuarterNotes = std::max (0.0, startQuarterNotes);
 
-    const auto playback = engine_.playbackInfo();
-    const double rate = playback.sampleRate > 0 ? playback.sampleRate : 48000.0;
-    clip.startQuarterNotes = waveform::Timing::quarterNotesFromSamples (playback.positionSamples, rate, playback.tempoBpm);
-
-    auto command = std::make_unique<waveform::AddAudioClipCommand> (trackId, std::move (clip));
-    history_.execute (project_, std::move (command));
-    selectedTrackId_ = trackId;
+    history_.execute (project_, std::make_unique<waveform::AddAudioClipCommand> (destination, std::move (clip)));
+    selectedTrackId_ = destination;
     rebuildTracks();
     syncEngine();
     refreshHistoryButtons();
-    setStatus ("Added " + file.getFileName() + " at the playhead.");
+    setStatus ("Added " + file.getFileName() + ".");
 }
 
 void MainComponent::saveProject (const juce::File& file)
@@ -1141,6 +1193,7 @@ void MainComponent::loadProject (const juce::File& file)
     applyModelToControls();
     rebuildTracks();
     syncEngine();
+    browser_.setFolder (file.getParentDirectory());
     setStatus ("Opened " + file.getFileName());
 }
 
