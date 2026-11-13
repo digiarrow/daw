@@ -330,9 +330,17 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
         }
     }
 
-    if (node.contains ("instrument") && node.at ("instrument").is_string()
-        && node.at ("instrument").get<std::string>() == "sampler")
-        track.instrument = InstrumentKind::Sampler;
+    if (node.contains ("instrument") && node.at ("instrument").is_string())
+    {
+        const auto name = node.at ("instrument").get<std::string>();
+
+        if (name == "sampler")
+            track.instrument = InstrumentKind::Sampler;
+        else if (name == "fm")
+            track.instrument = InstrumentKind::Fm;
+        else if (name == "drum")
+            track.instrument = InstrumentKind::Drum;
+    }
 
     if (node.contains ("zones") && node.at ("zones").is_array())
     {
@@ -490,7 +498,16 @@ json trackToJson (const Track& track)
     }
 
     trackJson["effects"] = std::move (effects);
-    trackJson["instrument"] = track.instrument == InstrumentKind::Sampler ? "sampler" : "synth";
+    const char* instrument = "synth";
+
+    if (track.instrument == InstrumentKind::Sampler)
+        instrument = "sampler";
+    else if (track.instrument == InstrumentKind::Fm)
+        instrument = "fm";
+    else if (track.instrument == InstrumentKind::Drum)
+        instrument = "drum";
+
+    trackJson["instrument"] = instrument;
     json zones = json::array();
 
     for (const auto& zone : track.samplerZones)

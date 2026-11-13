@@ -212,10 +212,67 @@ float lfoValue (Lfo& lfo, int frames, double sampleRate) noexcept
     return static_cast<float> (std::sin (lfo.phase * 6.283185307179586) * lfo.depth);
 }
 
+namespace
+{
+
+float voiceEnvelope (double seconds, double sinceRelease, const SynthPatch& patch) noexcept
+{
+    const double attack = std::max (1.0e-4, patch.attackSeconds);
+    const float sustain = std::clamp (static_cast<float> (patch.sustain), 0.0f, 1.0f);
+    const float held = seconds < attack ? static_cast<float> (seconds / attack) : sustain;
+
+    if (sinceRelease >= 0.0)
+        return std::max (0.0f, held * (1.0f - static_cast<float> (sinceRelease / std::max (1.0e-4, patch.releaseSeconds))));
+
+    return held;
+}
+
+void renderVoices (const SoundingNote* notes, int noteCount, int frames, double sampleRate, const SynthPatch& patch, float leftGain, float rightGain, float* left, float* right, bool drum) noexcept
+{
+    if (notes == nullptr || left == nullptr || right == nullptr || frames <= 0 || ! (sampleRate > 0.0))
+        return;
+
+    for (int index = 0; index < noteCount; ++index)
+    {
+        const auto& note = notes[index];
+        const float velocity = static_cast<float> (std::clamp (note.velocity, 1, 127)) / 127.0f;
+        const double frequency = 440.0 * std::pow (2.0, (static_cast<double> (note.note) - 69.0) / 12.0);
+        const int first = std::clamp (static_cast<int> (std::floor (note.onsetSeconds * sampleRate)), 0, frames);
+        const int last = std::clamp (static_cast<int> (std::ceil ((note.releaseSeconds + patch.releaseSeconds) * sampleRate)), 0, frames);
+
+        for (int frame = first; frame < last; ++frame)
+        {
+            const double time = static_cast<double> (frame) / sampleRate;
+            const float env = voiceEnvelope (time - note.onsetSeconds, time - note.releaseSeconds, patch);
+
+            if (env <= 0.0f)
+                continue;
+
+            const float sample = drum
+                                   ? drumSample (std::max (0.0, time - note.onsetSeconds), static_cast<float> (frequency * 0.25), 0.35f, static_cast<float> (patch.decaySeconds + 0.05))
+                                   : fmSample (frequency, frequency * 2.0, 1.4, std::max (0.0, time - note.onsetSeconds));
+            left[frame] += sample * env * velocity * leftGain;
+            right[frame] += sample * env * velocity * rightGain;
+        }
+    }
+}
+
+} // namespace
+
 float fmSample (double carrierHz, double modulatorHz, double index, double timeSeconds) noexcept
 {
     const double modulation = std::sin (2.0 * 3.141592653589793 * modulatorHz * timeSeconds) * index;
     return static_cast<float> (std::sin (2.0 * 3.141592653589793 * carrierHz * timeSeconds + modulation));
+}
+
+void renderFmNotes (const SoundingNote* notes, int noteCount, int frames, double sampleRate, const SynthPatch& patch, float leftGain, float rightGain, float* left, float* right) noexcept
+{
+    renderVoices (notes, noteCount, frames, sampleRate, patch, leftGain, rightGain, left, right, false);
+}
+
+void renderDrumNotes (const SoundingNote* notes, int noteCount, int frames, double sampleRate, const SynthPatch& patch, float leftGain, float rightGain, float* left, float* right) noexcept
+{
+    renderVoices (notes, noteCount, frames, sampleRate, patch, leftGain, rightGain, left, right, true);
 }
 
 float drumSample (double timeSeconds, float toneHz, float noiseMix, float decaySeconds) noexcept

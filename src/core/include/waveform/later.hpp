@@ -1,6 +1,7 @@
 #pragma once
 
 #include "waveform/project.hpp"
+#include "waveform/synth.hpp"
 
 #include <vector>
 
@@ -89,6 +90,9 @@ struct Lfo
 [[nodiscard]] float lfoValue (Lfo& lfo, int frames, double sampleRate) noexcept;
 
 [[nodiscard]] float fmSample (double carrierHz, double modulatorHz, double index, double timeSeconds) noexcept;
+
+void renderFmNotes (const SoundingNote* notes, int noteCount, int frames, double sampleRate, const SynthPatch& patch, float leftGain, float rightGain, float* left, float* right) noexcept;
+void renderDrumNotes (const SoundingNote* notes, int noteCount, int frames, double sampleRate, const SynthPatch& patch, float leftGain, float rightGain, float* left, float* right) noexcept;
 [[nodiscard]] float drumSample (double timeSeconds, float toneHz, float noise, float decaySeconds) noexcept;
 
 struct ScriptResult

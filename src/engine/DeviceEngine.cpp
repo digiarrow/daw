@@ -866,11 +866,14 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
             if (! track.isMidi || track.mute)
                 return;
 
+            if (transport_.state() == TransportState::Playing)
+                return;
+
             const PanGains pan = constantPowerPan (track.pan);
-            renderSynthNotes (liveNotes, liveCount, count, rate, track.patch, synthMemory_[static_cast<std::size_t> (monitor)],
-                              track.gain * pan.left * graph->masterGain,
-                              track.gain * pan.right * graph->masterGain,
-                              left + offset, right + offset);
+            renderTrackInstrument (track, liveNotes, liveCount, count, rate, synthMemory_[static_cast<std::size_t> (monitor)],
+                                   track.gain * pan.left * graph->masterGain,
+                                   track.gain * pan.right * graph->masterGain,
+                                   left + offset, right + offset);
         };
 
         if (countingIn_)

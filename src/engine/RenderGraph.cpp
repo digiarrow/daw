@@ -4,6 +4,7 @@
 #include "waveform/mix.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/routing.hpp"
+#include "waveform/later.hpp"
 #include "waveform/sampler.hpp"
 #include "waveform/session.hpp"
 #include "waveform/synth.hpp"
@@ -116,6 +117,7 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.gainDb = static_cast<float> (track.mixer.gainDb);
         rendered.gain = dbToLinear (track.mixer.gainDb);
         rendered.sampler = track.instrument == InstrumentKind::Sampler;
+        rendered.instrument = track.instrument;
         rendered.automation = track.automation;
 
         for (const auto& zone : track.samplerZones)
@@ -318,6 +320,18 @@ void renderTrackInstrument (const RenderTrack& track,
                            float* left,
                            float* right) noexcept
 {
+    if (track.instrument == InstrumentKind::Fm)
+    {
+        renderFmNotes (notes, noteCount, frames, sampleRate, track.patch, leftGain, rightGain, left, right);
+        return;
+    }
+
+    if (track.instrument == InstrumentKind::Drum)
+    {
+        renderDrumNotes (notes, noteCount, frames, sampleRate, track.patch, leftGain, rightGain, left, right);
+        return;
+    }
+
     if (track.sampler && ! track.zones.empty())
     {
         SamplerZoneView views[8];

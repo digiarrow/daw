@@ -108,7 +108,9 @@ struct SamplerZone
 enum class InstrumentKind
 {
     Synth,
-    Sampler
+    Sampler,
+    Fm,
+    Drum
 };
 
 struct Track

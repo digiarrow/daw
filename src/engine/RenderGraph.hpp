@@ -74,6 +74,7 @@ struct RenderTrack
     EffectSlot effects[kMaxInserts] {};
     int effectCount = 0;
     bool sampler = false;
+    InstrumentKind instrument = InstrumentKind::Synth;
     std::vector<RenderSamplerZone> zones;
     std::vector<AutomationLane> automation;
     float gain = 1.0f;
@@ -157,6 +158,17 @@ struct GraphBuildResult
                                            const std::filesystem::path* projectFile,
                                            ClipLibrary& library,
                                            double sampleRate);
+
+void renderTrackInstrument (const RenderTrack& track,
+                           const SoundingNote* notes,
+                           int noteCount,
+                           int frames,
+                           double sampleRate,
+                           SynthVoiceMemory& memory,
+                           float leftGain,
+                           float rightGain,
+                           float* left,
+                           float* right) noexcept;
 
 /// Mixes one contiguous timeline region into `left`/`right`, then adds metronome and test tone.
 /// Clears the destination first. Does not allocate. `tone` may be null when `testTone` is false.

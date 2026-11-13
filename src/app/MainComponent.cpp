@@ -363,6 +363,37 @@ MainComponent::MainComponent()
     launchBox_.addItem ("Launch beat", 2);
     launchBox_.addItem ("Launch bar", 3);
     launchBox_.setSelectedId (3, juce::dontSendNotification);
+    instrumentBox_.addItem ("Synth", 1);
+    instrumentBox_.addItem ("Sampler", 2);
+    instrumentBox_.addItem ("FM", 3);
+    instrumentBox_.addItem ("Drum", 4);
+    instrumentBox_.setSelectedId (1, juce::dontSendNotification);
+    instrumentBox_.onChange = [this]
+    {
+        if (updatingControls_)
+            return;
+
+        auto* track = selectedTrack();
+
+        if (track == nullptr || track->type != waveform::TrackType::Midi)
+            return;
+
+        const waveform::InstrumentKind kinds[] = {
+            waveform::InstrumentKind::Synth,
+            waveform::InstrumentKind::Sampler,
+            waveform::InstrumentKind::Fm,
+            waveform::InstrumentKind::Drum
+        };
+        const int index = instrumentBox_.getSelectedId() - 1;
+
+        if (index < 0 || index > 3)
+            return;
+
+        history_.execute (project_, std::make_unique<waveform::SetInstrumentCommand> (track->id, kinds[index]));
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus ("Instrument is " + instrumentBox_.getText() + ".");
+    };
     arrangementButton_.onClick = [this]
     {
         showSession_ = false;
@@ -537,7 +568,7 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &launchBox_, &arrangementButton_, &sessionButton_, &pluginButton_,
+             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
     {
         addAndMakeVisible (component);
@@ -676,6 +707,8 @@ void MainComponent::resized()
     launchBox_.setBounds (trackHeader.removeFromLeft (110));
     trackHeader.removeFromLeft (4);
     pluginButton_.setBounds (trackHeader.removeFromLeft (84));
+    trackHeader.removeFromLeft (4);
+    instrumentBox_.setBounds (trackHeader.removeFromLeft (100));
     exportButton_.setBounds (trackHeader.removeFromRight (96));
     trackHeader.removeFromRight (6);
     collectButton_.setBounds (trackHeader.removeFromRight (80));
@@ -1146,6 +1179,22 @@ void MainComponent::dropAudioFile (const juce::File& file, const std::string& tr
 
     if (destination.empty())
         destination = ensureAudioTrack();
+
+    if (const auto* track = waveform::findTrack (project_, destination); track != nullptr && track->type == waveform::TrackType::Midi)
+    {
+        waveform::SamplerZone zone;
+        zone.file = path;
+        zone.rootNote = 60;
+        zone.lowNote = 0;
+        zone.highNote = 127;
+        history_.execute (project_, std::make_unique<waveform::AddSamplerZoneCommand> (destination, std::move (zone)));
+        selectedTrackId_ = destination;
+        rebuildTracks();
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus ("Sampler zone added. The track now plays this file from MIDI.");
+        return;
+    }
 
     if (const auto* track = waveform::findTrack (project_, destination); track != nullptr && track->type != waveform::TrackType::Audio)
     {
@@ -1731,6 +1780,21 @@ void MainComponent::applyModelToControls()
     numeratorBox_.setSelectedId (project_.timeSignature.numerator, juce::dontSendNotification);
     denominatorBox_.setSelectedId (project_.timeSignature.denominator, juce::dontSendNotification);
     loopButton_.setToggleState (project_.loopEnabled, juce::dontSendNotification);
+
+    if (const auto* track = selectedTrack(); track != nullptr && track->type == waveform::TrackType::Midi)
+    {
+        int id = 1;
+
+        if (track->instrument == waveform::InstrumentKind::Sampler)
+            id = 2;
+        else if (track->instrument == waveform::InstrumentKind::Fm)
+            id = 3;
+        else if (track->instrument == waveform::InstrumentKind::Drum)
+            id = 4;
+
+        instrumentBox_.setSelectedId (id, juce::dontSendNotification);
+    }
+
     updatingControls_ = false;
 }
 
@@ -1738,4 +1802,6 @@ void MainComponent::rebuildSelection()
 {
     for (std::size_t index = 0; index < rows_.size() && index < project_.tracks.size(); ++index)
         rows_[index]->setSelected (project_.tracks[index].id == selectedTrackId_);
+
+    applyModelToControls();
 }

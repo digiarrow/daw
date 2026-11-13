@@ -879,4 +879,58 @@ void SetPluginCommand::revert (Project& project)
 
 const char* SetPluginCommand::name() const { return "Plug-in"; }
 
+SetInstrumentCommand::SetInstrumentCommand (std::string trackId, InstrumentKind instrument)
+    : trackId_ (std::move (trackId)), next_ (instrument)
+{
+}
+
+void SetInstrumentCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr && track->type == TrackType::Midi;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->instrument;
+    track->instrument = next_;
+}
+
+void SetInstrumentCommand::revert (Project& project)
+{
+    if (applied_)
+        if (auto* track = findTrack (project, trackId_))
+            track->instrument = previous_;
+}
+
+const char* SetInstrumentCommand::name() const { return "Instrument"; }
+
+AddSamplerZoneCommand::AddSamplerZoneCommand (std::string trackId, SamplerZone zone)
+    : trackId_ (std::move (trackId)), zone_ (std::move (zone))
+{
+}
+
+void AddSamplerZoneCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr && track->type == TrackType::Midi;
+
+    if (! applied_)
+        return;
+
+    track->instrument = InstrumentKind::Sampler;
+    track->samplerZones.push_back (zone_);
+}
+
+void AddSamplerZoneCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_); track != nullptr && ! track->samplerZones.empty())
+        track->samplerZones.pop_back();
+}
+
+const char* AddSamplerZoneCommand::name() const { return "Sampler Zone"; }
+
 } // namespace waveform

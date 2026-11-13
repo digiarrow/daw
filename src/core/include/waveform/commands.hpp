@@ -343,6 +343,35 @@ private:
     bool applied_ = false;
 };
 
+class SetInstrumentCommand : public EditCommand
+{
+public:
+    SetInstrumentCommand (std::string trackId, InstrumentKind instrument);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    InstrumentKind next_ = InstrumentKind::Synth;
+    InstrumentKind previous_ = InstrumentKind::Synth;
+    bool applied_ = false;
+};
+
+class AddSamplerZoneCommand : public EditCommand
+{
+public:
+    AddSamplerZoneCommand (std::string trackId, SamplerZone zone);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    SamplerZone zone_;
+    bool applied_ = false;
+};
+
 class SetPluginCommand : public EditCommand
 {
 public:

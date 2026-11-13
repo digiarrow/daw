@@ -135,6 +135,7 @@ private:
     juce::ComboBox countInBox_;
     juce::ComboBox midiInputBox_;
     juce::ComboBox launchBox_;
+    juce::ComboBox instrumentBox_;
 
     BrowserPanel browser_;
     ArrangementView arrangement_;
