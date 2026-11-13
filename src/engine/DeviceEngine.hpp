@@ -169,6 +169,10 @@ private:
     bool testToneEnabled_ = false;
     std::vector<float> scratchLeft_;
     std::vector<float> scratchRight_;
+    std::vector<float> routeStorage_;
+    std::unique_ptr<EffectState[]> effectArena_;
+    BlockScratch blockScratch_ {};
+    int scratchFrames_ = 0;
 
     // --- published to the message thread ---
     std::atomic<std::int64_t> positionSamples_ { 0 };

@@ -101,6 +101,8 @@ private:
     juce::TextButton addFileButton_ { "Add Audio File" };
     juce::TextButton addAudioTrackButton_ { "Add Audio Track" };
     juce::TextButton addMidiTrackButton_ { "Add MIDI Track" };
+    juce::TextButton addDelayButton_ { "Add Delay" };
+    juce::TextButton makeGroupButton_ { "Make Group" };
     juce::TextButton loadDemoButton_ { "Load Demo" };
     juce::TextButton openButton_ { "Open" };
     juce::TextButton saveButton_ { "Save" };

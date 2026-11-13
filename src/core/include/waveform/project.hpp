@@ -1,5 +1,6 @@
 #pragma once
 
+#include "waveform/effects.hpp"
 #include "waveform/timing.hpp"
 
 #include <string>
@@ -80,13 +81,23 @@ struct MidiClip
 
 using Clip = std::variant<AudioClip, MidiClip>;
 
+struct Send
+{
+    std::string targetId = "master";
+    double levelDb = -96.0;
+};
+
 struct Track
 {
     std::string id;
     std::string name;
     TrackType type = TrackType::Audio;
+    bool group = false;
+    std::string outputId = "master";
     MixerState mixer;
     SynthPatch synth;
+    std::vector<Send> sends;
+    std::vector<EffectSlot> effects;
     std::vector<Clip> clips;
 };
 

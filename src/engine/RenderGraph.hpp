@@ -1,7 +1,9 @@
 #pragma once
 
 #include "ClipLibrary.hpp"
+#include "waveform/effects.hpp"
 #include "waveform/project.hpp"
+#include "waveform/routing.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/synthesis.hpp"
 
@@ -43,11 +45,52 @@ struct RenderTrack
     std::vector<RenderMidiClip> midiClips;
     SynthPatch patch;
     bool isMidi = false;
+    bool group = false;
+    int outputBus = 0;
+    int sendBus[kMaxSends] { -1, -1 };
+    float sendGain[kMaxSends] { 0.0f, 0.0f };
+    EffectSlot effects[kMaxInserts] {};
+    int effectCount = 0;
     float gain = 1.0f;
     float pan = 0.0f;
     bool mute = false;
     bool solo = false;
 };
+
+/// Audio-thread scratch for per-track processing. Pointers address `capacity` frames each.
+struct BlockScratch
+{
+    float* trackLeft[kMaxRouteTracks] {};
+    float* trackRight[kMaxRouteTracks] {};
+    float* busLeft[kMaxBuses] {};
+    float* busRight[kMaxBuses] {};
+    EffectState* effects = nullptr; ///< Row-major, track * kMaxInserts + slot.
+    int capacity = 0;
+};
+
+inline void bindBlockScratch (BlockScratch& scratch, float* storage, int frames, EffectState* effects) noexcept
+{
+    int cursor = 0;
+
+    for (int index = 0; index < kMaxRouteTracks; ++index)
+    {
+        scratch.trackLeft[index] = storage + cursor;
+        cursor += frames;
+        scratch.trackRight[index] = storage + cursor;
+        cursor += frames;
+    }
+
+    for (int index = 0; index < kMaxBuses; ++index)
+    {
+        scratch.busLeft[index] = storage + cursor;
+        cursor += frames;
+        scratch.busRight[index] = storage + cursor;
+        cursor += frames;
+    }
+
+    scratch.effects = effects;
+    scratch.capacity = frames;
+}
 
 /// Per-track synth memory plus any keys currently held from a MIDI input.
 /// The audio thread owns the memory. Null skips MIDI rendering.
@@ -95,6 +138,7 @@ void renderLinearBlock (const RenderGraph* graph,
                         bool testTone,
                         Oscillator* tone,
                         std::atomic<int>* overflowCount,
-                        SynthSchedule* synth) noexcept;
+                        SynthSchedule* synth,
+                        BlockScratch* scratch = nullptr) noexcept;
 
 } // namespace waveform

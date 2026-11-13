@@ -1,3 +1,4 @@
+#include "waveform/effects.hpp"
 #include "waveform/serialize.hpp"
 #include "waveform/version.hpp"
 
@@ -284,6 +285,43 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
     if (track.type == TrackType::Midi && node.contains ("synth"))
         track.synth = synthFromJson (node.at ("synth"));
 
+    if (node.contains ("group") && node.at ("group").is_boolean())
+        track.group = node.at ("group").get<bool>();
+
+    if (node.contains ("output") && node.at ("output").is_string())
+        track.outputId = node.at ("output").get<std::string>();
+
+    if (track.outputId.empty())
+        track.outputId = "master";
+
+    if (node.contains ("sends") && node.at ("sends").is_array())
+    {
+        for (const auto& sendNode : node.at ("sends"))
+        {
+            Send send;
+            send.targetId = requireString (sendNode, "target");
+            send.levelDb = requireNumber (sendNode, "levelDb");
+            track.sends.push_back (std::move (send));
+        }
+    }
+
+    if (node.contains ("effects") && node.at ("effects").is_array())
+    {
+        for (const auto& effectNode : node.at ("effects"))
+        {
+            EffectSlot effect;
+            effect.kind = effectFromName (requireString (effectNode, "kind").c_str());
+            effect.bypass = requireBool (effectNode, "bypass");
+            effect.p0 = requireNumber (effectNode, "p0");
+            effect.p1 = requireNumber (effectNode, "p1");
+            effect.p2 = requireNumber (effectNode, "p2");
+            effect.p3 = requireNumber (effectNode, "p3");
+            effect.p4 = requireNumber (effectNode, "p4");
+            effect.p5 = requireNumber (effectNode, "p5");
+            track.effects.push_back (effect);
+        }
+    }
+
     return track;
 }
 
@@ -361,6 +399,31 @@ json trackToJson (const Track& track)
     if (track.type == TrackType::Midi)
         trackJson["synth"] = synthToJson (track.synth);
 
+    trackJson["group"] = track.group;
+    trackJson["output"] = track.outputId.empty() ? "master" : track.outputId;
+    json sends = json::array();
+
+    for (const auto& send : track.sends)
+        sends.push_back (json { { "levelDb", send.levelDb }, { "target", send.targetId } });
+
+    trackJson["sends"] = std::move (sends);
+    json effects = json::array();
+
+    for (const auto& effect : track.effects)
+    {
+        effects.push_back (json {
+            { "bypass", effect.bypass },
+            { "kind", effectName (effect.kind) },
+            { "p0", effect.p0 },
+            { "p1", effect.p1 },
+            { "p2", effect.p2 },
+            { "p3", effect.p3 },
+            { "p4", effect.p4 },
+            { "p5", effect.p5 }
+        });
+    }
+
+    trackJson["effects"] = std::move (effects);
     return trackJson;
 }
 

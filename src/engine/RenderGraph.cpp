@@ -1,7 +1,9 @@
 #include "RenderGraph.hpp"
 
+#include "waveform/effects.hpp"
 #include "waveform/mix.hpp"
 #include "waveform/paths.hpp"
+#include "waveform/routing.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/timing.hpp"
 
@@ -39,7 +41,12 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.solo = track.mixer.solo;
 
         rendered.isMidi = track.type == TrackType::Midi;
+        rendered.group = track.group;
         rendered.patch = track.synth;
+        rendered.effectCount = static_cast<int> (std::min<std::size_t> (track.effects.size(), static_cast<std::size_t> (kMaxInserts)));
+
+        for (int effect = 0; effect < rendered.effectCount; ++effect)
+            rendered.effects[effect] = track.effects[static_cast<std::size_t> (effect)];
 
         if (track.type == TrackType::Midi)
         {
@@ -106,6 +113,44 @@ GraphBuildResult buildGraph (const Project& project,
         graph->tracks.push_back (std::move (rendered));
     }
 
+    int nextBus = 1;
+
+    for (auto& track : graph->tracks)
+        if (track.group && nextBus < kMaxBuses)
+            track.outputBus = nextBus++;
+
+    std::vector<std::string> ids;
+    ids.reserve (project.tracks.size());
+
+    for (const auto& track : project.tracks)
+        ids.push_back (track.id);
+
+    auto findBus = [&] (const std::string& id) {
+        if (id.empty() || id == "master")
+            return 0;
+
+        for (std::size_t index = 0; index < ids.size() && index < graph->tracks.size(); ++index)
+            if (ids[index] == id && graph->tracks[index].group)
+                return graph->tracks[index].outputBus;
+
+        return 0;
+    };
+
+    for (std::size_t index = 0; index < graph->tracks.size() && index < project.tracks.size(); ++index)
+    {
+        auto& rendered = graph->tracks[index];
+        const auto& source = project.tracks[index];
+
+        if (! rendered.group)
+            rendered.outputBus = findBus (source.outputId);
+
+        for (int send = 0; send < kMaxSends && send < static_cast<int> (source.sends.size()); ++send)
+        {
+            rendered.sendBus[send] = findBus (source.sends[static_cast<std::size_t> (send)].targetId);
+            rendered.sendGain[send] = dbToLinear (source.sends[static_cast<std::size_t> (send)].levelDb);
+        }
+    }
+
     result.graph = std::move (graph);
     return result;
 }
@@ -122,7 +167,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         bool testTone,
                         Oscillator* tone,
                         std::atomic<int>* overflowCount,
-                        SynthSchedule* synth) noexcept
+                        SynthSchedule* synth,
+                        BlockScratch* scratch) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -182,13 +228,113 @@ void renderLinearBlock (const RenderGraph* graph,
     if (overflow && overflowCount != nullptr)
         overflowCount->store (1, std::memory_order_relaxed);
 
-    MixView mix;
-    mix.tracks = tracks;
-    mix.trackCount = trackCount;
-    mix.masterGain = graph != nullptr ? graph->masterGain : 1.0f;
-    mixBlock (mix, timelineStart, frames, left, right);
+    bool routed = false;
 
-    if (graph != nullptr && synth != nullptr && synth->memories != nullptr
+    if (scratch != nullptr && graph != nullptr && scratch->capacity >= frames)
+        for (const auto& track : graph->tracks)
+            if (track.group || track.effectCount > 0 || track.outputBus != 0 || track.sendGain[0] > 0.0f || track.sendGain[1] > 0.0f)
+                routed = true;
+
+    if (routed)
+    {
+        RouteEndpoint endpoints[kMaxRouteTracks];
+        const int count = std::min (trackCount, kMaxRouteTracks);
+        int busCount = 1;
+
+        for (int index = 0; index < count; ++index)
+        {
+            if (scratch->trackLeft[index] == nullptr || scratch->trackRight[index] == nullptr)
+            {
+                routed = false;
+                break;
+            }
+
+            const auto& source = graph->tracks[static_cast<std::size_t> (index)];
+            auto saved = tracks[index];
+            tracks[index].gain = 1.0f;
+            tracks[index].pan = 0.0f;
+            tracks[index].mute = false;
+            tracks[index].solo = false;
+            MixView one;
+            one.tracks = &tracks[index];
+            one.trackCount = 1;
+            one.masterGain = 1.0f;
+            mixBlock (one, timelineStart, frames, scratch->trackLeft[index], scratch->trackRight[index]);
+            tracks[index] = saved;
+
+            if (synth != nullptr && synth->memories != nullptr && source.isMidi)
+            {
+                SoundingNote sounding[128];
+                int noteCount = 0;
+                const double blockStart = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
+                const double secondsPerQuarter = 60.0 / tempoBpm;
+
+                for (const auto& clip : source.midiClips)
+                    for (const auto& note : clip.notes)
+                    {
+                        if (noteCount >= 128)
+                            break;
+
+                        const double onset = (clip.startQuarterNotes + note.startQuarterNotes - blockStart) * secondsPerQuarter;
+                        const double release = onset + note.lengthQuarterNotes * secondsPerQuarter;
+
+                        if (release + source.patch.releaseSeconds < 0.0 || onset > static_cast<double> (frames) / sampleRate)
+                            continue;
+
+                        sounding[noteCount].note = note.note;
+                        sounding[noteCount].velocity = note.velocity;
+                        sounding[noteCount].onsetSeconds = onset;
+                        sounding[noteCount].releaseSeconds = release;
+                        ++noteCount;
+                    }
+
+                renderSynthNotes (sounding, noteCount, frames, sampleRate, source.patch, synth->memories[index],
+                                  1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index]);
+            }
+
+            if (scratch->effects != nullptr)
+                processInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
+                                scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate);
+
+            const PanGains pan = constantPowerPan (saved.pan);
+            endpoints[index].outputBus = source.outputBus;
+            endpoints[index].group = source.group;
+            endpoints[index].mute = saved.mute;
+            endpoints[index].solo = saved.solo;
+            endpoints[index].gain = saved.gain;
+            endpoints[index].panLeft = pan.left;
+            endpoints[index].panRight = pan.right;
+            endpoints[index].sendBus[0] = source.sendBus[0];
+            endpoints[index].sendBus[1] = source.sendBus[1];
+            endpoints[index].sendGain[0] = source.sendGain[0];
+            endpoints[index].sendGain[1] = source.sendGain[1];
+            busCount = std::max (busCount, source.outputBus + 1);
+        }
+
+        if (routed)
+        {
+            routeTracks (scratch->trackLeft, scratch->trackRight, endpoints, count,
+                         scratch->busLeft, scratch->busRight, std::min (busCount, kMaxBuses), frames);
+            const float master = graph->masterGain;
+
+            for (int frame = 0; frame < frames; ++frame)
+            {
+                left[frame] = scratch->busLeft[0][frame] * master;
+                right[frame] = scratch->busRight[0][frame] * master;
+            }
+        }
+    }
+
+    if (! routed)
+    {
+        MixView mix;
+        mix.tracks = tracks;
+        mix.trackCount = trackCount;
+        mix.masterGain = graph != nullptr ? graph->masterGain : 1.0f;
+        mixBlock (mix, timelineStart, frames, left, right);
+    }
+
+    if (! routed && graph != nullptr && synth != nullptr && synth->memories != nullptr
         && Timing::isValidSampleRate (sampleRate) && tempoBpm > 0.0)
     {
         bool anySolo = false;

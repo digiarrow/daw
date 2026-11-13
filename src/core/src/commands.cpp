@@ -1,4 +1,5 @@
 #include "waveform/commands.hpp"
+#include "waveform/routing.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -608,5 +609,115 @@ void SetSynthPatchCommand::revert (Project& project)
 }
 
 const char* SetSynthPatchCommand::name() const { return "Instrument"; }
+
+AddEffectCommand::AddEffectCommand (std::string trackId, EffectKind kind)
+    : trackId_ (std::move (trackId)), slot_ (defaultEffect (kind))
+{
+}
+
+void AddEffectCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr && track->effects.size() < static_cast<std::size_t> (kMaxInserts);
+
+    if (applied_)
+        track->effects.push_back (slot_);
+}
+
+void AddEffectCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_); track != nullptr && ! track->effects.empty())
+        track->effects.pop_back();
+}
+
+const char* AddEffectCommand::name() const { return "Add Effect"; }
+
+SetTrackOutputCommand::SetTrackOutputCommand (std::string trackId, std::string outputId)
+    : trackId_ (std::move (trackId)), next_ (outputId.empty() ? "master" : std::move (outputId))
+{
+}
+
+void SetTrackOutputCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->outputId.empty() ? "master" : track->outputId;
+    track->outputId = next_;
+}
+
+void SetTrackOutputCommand::revert (Project& project)
+{
+    if (applied_)
+        if (auto* track = findTrack (project, trackId_))
+            track->outputId = previous_;
+}
+
+const char* SetTrackOutputCommand::name() const { return "Route Track"; }
+
+SetSendCommand::SetSendCommand (std::string trackId, int index, Send send)
+    : trackId_ (std::move (trackId)), index_ (std::clamp (index, 0, kMaxSends - 1)), next_ (std::move (send))
+{
+}
+
+void SetSendCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    if (static_cast<int> (track->sends.size()) <= index_)
+        track->sends.resize (static_cast<std::size_t> (index_ + 1));
+
+    hadPrevious_ = true;
+    previous_ = track->sends[static_cast<std::size_t> (index_)];
+    track->sends[static_cast<std::size_t> (index_)] = next_;
+}
+
+void SetSendCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        if (static_cast<int> (track->sends.size()) > index_)
+            track->sends[static_cast<std::size_t> (index_)] = previous_;
+}
+
+const char* SetSendCommand::name() const { return "Set Send"; }
+
+SetGroupCommand::SetGroupCommand (std::string trackId, bool group)
+    : trackId_ (std::move (trackId)), next_ (group)
+{
+}
+
+void SetGroupCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->group;
+    track->group = next_;
+}
+
+void SetGroupCommand::revert (Project& project)
+{
+    if (applied_)
+        if (auto* track = findTrack (project, trackId_))
+            track->group = previous_;
+}
+
+const char* SetGroupCommand::name() const { return "Group Track"; }
 
 } // namespace waveform

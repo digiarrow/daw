@@ -15,6 +15,7 @@ What this slice does:
 - A piano roll: draw, move, resize, delete, velocity, grid snap, and quantize. Those edits undo.
 - An arrangement timeline: clips on a bar grid, drag to move, a playhead, and a loop brace.
 - Audio recording from the device input onto an audio track.
+- Track inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator), group buses, and two sends. **Add Delay** and **Make Group** are on the track toolbar.
 
 There is still no time-stretch and no plug-in hosting. The synth is the built-in instrument, not a hosted plug-in.
 

@@ -305,6 +305,31 @@ MainComponent::MainComponent()
     addFileButton_.onClick = [this] { chooseAudioFile(); };
     addAudioTrackButton_.onClick = [this] { addTrack (waveform::TrackType::Audio); };
     addMidiTrackButton_.onClick = [this] { addTrack (waveform::TrackType::Midi); };
+    addDelayButton_.onClick = [this]
+    {
+        if (selectedTrackId_.empty())
+            return;
+
+        history_.execute (project_, std::make_unique<waveform::AddEffectCommand> (selectedTrackId_, waveform::EffectKind::Delay));
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus ("Delay inserted on the selected track.");
+    };
+    makeGroupButton_.onClick = [this]
+    {
+        auto command = std::make_unique<waveform::AddTrackCommand> (waveform::TrackType::Audio, "Group");
+        const auto id = command->trackId();
+        history_.execute (project_, std::move (command));
+        history_.execute (project_, std::make_unique<waveform::SetGroupCommand> (id, true));
+
+        if (! selectedTrackId_.empty() && selectedTrackId_ != id)
+            history_.execute (project_, std::make_unique<waveform::SetTrackOutputCommand> (selectedTrackId_, id));
+
+        syncEngine();
+        rebuildTracks();
+        refreshHistoryButtons();
+        setStatus ("Group created. The selected track now feeds it.");
+    };
     loadDemoButton_.onClick = [this] { loadDemo(); };
     openButton_.onClick = [this] { chooseProjectOpen(); };
     saveButton_.onClick = [this] { chooseProjectSave(); };
@@ -338,7 +363,7 @@ MainComponent::MainComponent()
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
              &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
-             &loadDemoButton_, &openButton_, &saveButton_, &loopButton_, &metronomeButton_, &toneButton_,
+             &loadDemoButton_, &openButton_, &saveButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &arrangement_, &pianoRoll_, &trackViewport_ })
     {
@@ -462,6 +487,10 @@ void MainComponent::resized()
     addMidiTrackButton_.setBounds (trackHeader.removeFromLeft (130));
     trackHeader.removeFromLeft (6);
     loadDemoButton_.setBounds (trackHeader.removeFromLeft (100));
+    trackHeader.removeFromLeft (6);
+    addDelayButton_.setBounds (trackHeader.removeFromLeft (90));
+    trackHeader.removeFromLeft (6);
+    makeGroupButton_.setBounds (trackHeader.removeFromLeft (100));
     saveButton_.setBounds (trackHeader.removeFromRight (72));
     trackHeader.removeFromRight (6);
     openButton_.setBounds (trackHeader.removeFromRight (72));

@@ -652,6 +652,13 @@ void DeviceEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     const int scratch = std::max (block, 4096);
     scratchLeft_.assign (static_cast<std::size_t> (scratch), 0.0f);
     scratchRight_.assign (static_cast<std::size_t> (scratch), 0.0f);
+    scratchFrames_ = scratch;
+    routeStorage_.assign (static_cast<std::size_t> ((kMaxRouteTracks + kMaxBuses) * 2 * scratch), 0.0f);
+
+    if (effectArena_ == nullptr)
+        effectArena_.reset (new EffectState[static_cast<std::size_t> (kMaxRouteTracks * kMaxInserts)] {});
+
+    bindBlockScratch (blockScratch_, routeStorage_.data(), scratch, effectArena_.get());
 
     sampleRate_.store (static_cast<int> (std::lround (transport_.sampleRate())), std::memory_order_relaxed);
     bufferSize_.store (block, std::memory_order_relaxed);
@@ -754,7 +761,8 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                 {
                     renderLinearBlock (graph, rate, tempo, signature, start, count,
                                        left + offset, right + offset,
-                                       metronome_, false, nullptr, &structureOverflow_, &schedule);
+                                       metronome_, false, nullptr, &structureOverflow_, &schedule,
+                                       frames <= scratchFrames_ ? &blockScratch_ : nullptr);
                     offset += count;
                 });
             }

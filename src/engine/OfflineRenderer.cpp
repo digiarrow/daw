@@ -81,6 +81,11 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
         return result;
     }
 
+    constexpr int kBlock = 256;
+    std::vector<float> routeStorage (static_cast<std::size_t> ((kMaxRouteTracks + kMaxBuses) * 2 * kBlock));
+    auto effectArena = std::make_unique<EffectState[]> (static_cast<std::size_t> (kMaxRouteTracks * kMaxInserts));
+    BlockScratch scratch;
+    bindBlockScratch (scratch, routeStorage.data(), kBlock, effectArena.get());
     std::vector<SynthVoiceMemory> synthMemory (std::max<std::size_t> (1, built.graph->tracks.size()));
     SynthSchedule schedule;
     schedule.memories = synthMemory.data();
@@ -95,9 +100,8 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
     transport.play();
 
     const auto totalFrames = std::llround (request.seconds * request.sampleRate);
-    constexpr int kBlock = 256;
-    std::vector<float> left (static_cast<std::size_t> (kBlock));
-    std::vector<float> right (static_cast<std::size_t> (kBlock));
+    std::vector<float> left (kBlock);
+    std::vector<float> right (kBlock);
     Oscillator tone;
     juce::AudioBuffer<float> buffer (2, kBlock);
     double peak = 0.0;
@@ -141,7 +145,7 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
             renderLinearBlock (built.graph.get(), request.sampleRate, transport.tempoBpm(),
                                transport.timeSignature(), start, count,
                                left.data() + offset, right.data() + offset,
-                               request.metronome, false, nullptr, nullptr, &schedule);
+                               request.metronome, false, nullptr, nullptr, &schedule, &scratch);
             offset += count;
         });
 

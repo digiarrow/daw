@@ -234,6 +234,67 @@ private:
     bool applied_ = false;
 };
 
+class AddEffectCommand : public EditCommand
+{
+public:
+    AddEffectCommand (std::string trackId, EffectKind kind);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    EffectSlot slot_ {};
+    bool applied_ = false;
+};
+
+class SetTrackOutputCommand : public EditCommand
+{
+public:
+    SetTrackOutputCommand (std::string trackId, std::string outputId);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string next_;
+    std::string previous_ = "master";
+    bool applied_ = false;
+};
+
+class SetSendCommand : public EditCommand
+{
+public:
+    SetSendCommand (std::string trackId, int index, Send send);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    int index_ = 0;
+    Send next_ {};
+    Send previous_ {};
+    bool hadPrevious_ = false;
+    bool applied_ = false;
+};
+
+class SetGroupCommand : public EditCommand
+{
+public:
+    explicit SetGroupCommand (std::string trackId, bool group);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    bool next_ = false;
+    bool previous_ = false;
+    bool applied_ = false;
+};
+
 class SetSynthPatchCommand : public EditCommand
 {
 public:

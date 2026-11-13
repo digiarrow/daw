@@ -107,7 +107,9 @@ endif()
 
 add_library(waveform_core STATIC
     src/core/src/commands.cpp
+    src/core/src/effects.cpp
     src/core/src/midi.cpp
+    src/core/src/routing.cpp
     src/core/src/mix.cpp
     src/core/src/synth.cpp
     src/core/src/paths.cpp
@@ -192,6 +194,7 @@ waveform_set_output_dirs(waveform-render)
 
 if(WAVEFORM_BUILD_TESTS)
     add_executable(waveform_tests
+        tests/test_effects.cpp
         tests/test_midi.cpp
         tests/test_mix.cpp
         tests/test_project.cpp
