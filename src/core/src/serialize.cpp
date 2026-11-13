@@ -154,6 +154,7 @@ json midiClipToJson (const MidiClip& clip)
             { "channel", note.channel },
             { "lengthQuarterNotes", note.lengthQuarterNotes },
             { "note", note.note },
+            { "slide", note.slideSemitones },
             { "startQuarterNotes", note.startQuarterNotes },
             { "velocity", note.velocity }
         });
@@ -255,6 +256,9 @@ MidiNote noteFromJson (const json& node, const std::string& clipId)
 
     if (note.channel < 1 || note.channel > 16)
         fail ("MIDI clip '" + clipId + "' has a channel outside 1..16");
+
+    if (node.contains ("slide"))
+        note.slideSemitones = static_cast<float> (requireNumber (node, "slide"));
 
     if (std::isnan (note.startQuarterNotes) || note.startQuarterNotes < 0.0)
         fail ("MIDI clip '" + clipId + "' has a negative note start");
@@ -443,6 +447,15 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
             effect.p5 = requireNumber (effectNode, "p5");
             track.effects.push_back (effect);
         }
+    }
+
+    if (node.contains ("modulator") && node.at ("modulator").is_object())
+    {
+        const auto& modulator = node.at ("modulator");
+        track.modulator.enabled = requireBool (modulator, "enabled");
+        track.modulator.rateHz = requireNumber (modulator, "rateHz");
+        track.modulator.depth = requireNumber (modulator, "depth");
+        track.modulator.target = requireString (modulator, "target");
     }
 
     if (node.contains ("rack") && node.at ("rack").is_object())
@@ -667,6 +680,12 @@ json trackToJson (const Track& track)
     }
 
     trackJson["effects"] = std::move (effects);
+    trackJson["modulator"] = json {
+        { "depth", track.modulator.depth },
+        { "enabled", track.modulator.enabled },
+        { "rateHz", track.modulator.rateHz },
+        { "target", track.modulator.target }
+    };
     trackJson["rack"] = rackToJson (track.rack);
     const char* instrument = "synth";
 

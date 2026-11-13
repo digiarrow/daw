@@ -1,4 +1,5 @@
 #include "waveform/synth.hpp"
+#include "waveform/later.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -111,7 +112,7 @@ void renderSynthNotes (const SoundingNote* notes,
         if (note.note < 0 || note.note > 127 || note.velocity <= 0)
             continue;
 
-        const double frequency = 440.0 * std::pow (2.0, (static_cast<double> (note.note) - 69.0) / 12.0);
+        const double frequency = 440.0 * std::pow (2.0, (static_cast<double> (note.note) - 69.0) / 12.0) * mpeFrequencyRatio (note.slideSemitones);
         const float velocity = static_cast<float> (std::clamp (note.velocity, 1, 127)) / 127.0f;
         const int first = std::clamp (static_cast<int> (std::floor (note.onsetSeconds * sampleRate)), 0, frames);
         const double tail = note.releaseSeconds + std::max (1.0e-4, patch.releaseSeconds);

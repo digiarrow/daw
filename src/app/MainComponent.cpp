@@ -1,7 +1,9 @@
 #include "MainComponent.hpp"
 
+#include "ClipLibrary.hpp"
 #include "OfflineRenderer.hpp"
 #include "waveform/collect.hpp"
+#include "waveform/later.hpp"
 #include "StudioLookAndFeel.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/serialize.hpp"
@@ -694,6 +696,8 @@ MainComponent::MainComponent()
     pluginButton_.onClick = [this] { showPluginMenu(); };
     scriptButton_.onClick = [this] { showScriptConsole(); };
     rackButton_.onClick = [this] { showRackEditor(); };
+    lfoButton_.onClick = [this] { showLfo(); };
+    audioToMidiButton_.onClick = [this] { convertAudioToMidi(); };
     midiMapButton_.onClick = [this] { showMidiMap(); };
 
     sampleRateBox_.onChange = [this]
@@ -727,7 +731,7 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_,
+             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_, &lfoButton_, &audioToMidiButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &trackViewport_ })
     {
         addAndMakeVisible (component);
@@ -872,6 +876,10 @@ void MainComponent::resized()
     automationButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (4);
     rackButton_.setBounds (trackHeader.removeFromLeft (64));
+    trackHeader.removeFromLeft (4);
+    lfoButton_.setBounds (trackHeader.removeFromLeft (48));
+    trackHeader.removeFromLeft (4);
+    audioToMidiButton_.setBounds (trackHeader.removeFromLeft (110));
     exportButton_.setBounds (trackHeader.removeFromRight (96));
     trackHeader.removeFromRight (6);
     collectButton_.setBounds (trackHeader.removeFromRight (80));
@@ -1973,6 +1981,140 @@ void MainComponent::showPluginMenu()
                             const int latency = engine_.plugins().latency (index);
                             setStatus ("Loaded " + description.name + ". Latency " + juce::String (latency) + " samples, compensated on the other tracks.");
                         });
+}
+
+void MainComponent::showLfo()
+{
+    auto* track = selectedTrack();
+
+    if (track == nullptr)
+    {
+        setStatus ("Select a track to modulate.");
+        return;
+    }
+
+    auto* rate = new juce::Slider();
+    auto* depth = new juce::Slider();
+    auto* enable = new juce::ToggleButton ("Modulate volume");
+    auto* apply = new juce::TextButton ("Assign");
+    rate->setRange (0.05, 12.0, 0.01);
+    rate->setValue (track->modulator.rateHz);
+    rate->setSliderStyle (juce::Slider::LinearHorizontal);
+    rate->setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 20);
+    depth->setRange (0.0, 24.0, 0.1);
+    depth->setValue (track->modulator.depth);
+    depth->setSliderStyle (juce::Slider::LinearHorizontal);
+    depth->setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 20);
+    enable->setToggleState (track->modulator.enabled, juce::dontSendNotification);
+    auto* content = new juce::Component();
+    content->addAndMakeVisible (rate);
+    content->addAndMakeVisible (depth);
+    content->addAndMakeVisible (enable);
+    content->addAndMakeVisible (apply);
+    content->setSize (320, 150);
+    rate->setBounds (16, 16, 288, 28);
+    depth->setBounds (16, 52, 288, 28);
+    enable->setBounds (16, 84, 180, 24);
+    apply->setBounds (200, 112, 100, 28);
+    auto* window = new juce::DocumentWindow ("LFO", juce::Colour (waveform::StudioLookAndFeel::kPanel), juce::DocumentWindow::closeButton);
+    window->setContentOwned (content, true);
+    window->setUsingNativeTitleBar (true);
+    window->centreWithSize (340, 190);
+    window->setVisible (true);
+    const auto id = track->id;
+    apply->onClick = [this, id, rate, depth, enable, window]
+    {
+        waveform::Modulator modulator;
+        modulator.enabled = enable->getToggleState();
+        modulator.rateHz = rate->getValue();
+        modulator.depth = depth->getValue();
+        modulator.target = "mixer.gainDb";
+        history_.execute (project_, std::make_unique<waveform::SetModulatorCommand> (id, modulator));
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus (modulator.enabled ? "LFO is moving the track volume." : "LFO bypassed.");
+        juce::MessageManager::callAsync ([window] { delete window; });
+    };
+}
+
+void MainComponent::convertAudioToMidi()
+{
+    const auto* track = selectedTrack();
+    const waveform::AudioClip* audioClip = nullptr;
+
+    if (track != nullptr)
+        for (const auto& clip : track->clips)
+            if (const auto* audio = std::get_if<waveform::AudioClip> (&clip); audio != nullptr && audio->id == selectedClipId_)
+                audioClip = audio;
+
+    if (audioClip == nullptr && track != nullptr)
+        for (const auto& clip : track->clips)
+            if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
+                audioClip = audio;
+
+    if (audioClip == nullptr)
+    {
+        setStatus ("Select an audio clip to convert.");
+        return;
+    }
+
+    waveform::ClipLibrary library;
+    std::string error;
+    auto location = waveform::pathFromUtf8 (audioClip->file);
+
+    if (projectFile_.existsAsFile() && ! location.is_absolute())
+        location = waveform::resolveAudioPath (waveform::pathFromUtf8 (projectFile_.getFullPathName().toStdString()), audioClip->file);
+
+    auto audio = library.load (waveform::pathToUtf8 (location), 48000.0, error);
+
+    if (audio == nullptr)
+    {
+        setStatus (juce::String (error));
+        return;
+    }
+
+    const auto detected = waveform::audioToMidi (audio->left.data(), static_cast<int> (audio->frames()), audio->sampleRate);
+
+    if (detected.empty())
+    {
+        setStatus ("No steady pitch was found in that clip.");
+        return;
+    }
+
+    waveform::MidiClip midi;
+    midi.name = "From " + audioClip->name;
+    midi.startQuarterNotes = audioClip->startQuarterNotes;
+    midi.lengthQuarterNotes = std::max (0.25, audioClip->lengthSeconds * project_.tempoBpm / 60.0);
+
+    for (const auto& note : detected)
+    {
+        waveform::MidiNote midiNote;
+        midiNote.note = note.note;
+        midiNote.velocity = 100;
+        midiNote.startQuarterNotes = note.startSeconds * project_.tempoBpm / 60.0;
+        midiNote.lengthQuarterNotes = std::max (0.25, note.lengthSeconds * project_.tempoBpm / 60.0);
+        midi.notes.push_back (midiNote);
+    }
+
+    std::string destination;
+
+    for (const auto& candidate : project_.tracks)
+        if (candidate.type == waveform::TrackType::Midi)
+            destination = candidate.id;
+
+    if (destination.empty())
+    {
+        auto command = std::make_unique<waveform::AddTrackCommand> (waveform::TrackType::Midi, "From audio");
+        destination = command->trackId();
+        history_.execute (project_, std::move (command));
+    }
+
+    history_.execute (project_, std::make_unique<waveform::AddMidiClipCommand> (destination, std::move (midi)));
+    selectedTrackId_ = destination;
+    rebuildTracks();
+    syncEngine();
+    refreshHistoryButtons();
+    setStatus ("Audio-to-MIDI wrote a note from the clip's pitch.");
 }
 
 void MainComponent::showRackEditor()

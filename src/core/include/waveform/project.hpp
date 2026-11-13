@@ -91,6 +91,7 @@ struct MidiNote
     double lengthQuarterNotes = 1.0;
     int velocity = 100; ///< 1..127
     int channel = 1;    ///< 1..16
+    float slideSemitones = 0.0f; ///< MPE pitch slide, in semitones.
 };
 
 /// Stored for later phases. Phase 0 does not synthesise notes.
@@ -159,6 +160,14 @@ struct DeviceMacro
     std::vector<MacroAssignment> assignments;
 };
 
+struct Modulator
+{
+    bool enabled = false;
+    double rateHz = 0.5;
+    double depth = 6.0;
+    std::string target = "mixer.gainDb";
+};
+
 struct DeviceRack
 {
     std::vector<DeviceChain> chains;
@@ -180,6 +189,7 @@ struct Track
     std::vector<Send> sends;
     std::vector<EffectSlot> effects;
     DeviceRack rack;
+    Modulator modulator;
     std::vector<Clip> clips;
     std::vector<SessionSlot> session;
     std::string pluginIdentifier;

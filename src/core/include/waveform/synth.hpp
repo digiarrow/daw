@@ -23,6 +23,7 @@ struct SoundingNote
     int velocity = 100;
     double onsetSeconds = 0.0;
     double releaseSeconds = 1.0e9;
+    float slideSemitones = 0.0f;
 };
 
 /// Adds the built-in polysynth into `left` and `right`. Does not clear the buffers and does not allocate.

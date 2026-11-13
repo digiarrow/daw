@@ -468,6 +468,21 @@ private:
     bool applied_ = false;
 };
 
+class SetModulatorCommand : public EditCommand
+{
+public:
+    SetModulatorCommand (std::string trackId, Modulator modulator);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    Modulator next_ {};
+    Modulator previous_ {};
+    bool applied_ = false;
+};
+
 class SetRackCommand : public EditCommand
 {
 public:

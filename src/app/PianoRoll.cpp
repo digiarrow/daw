@@ -28,6 +28,25 @@ PianoRoll::PianoRoll()
     for (auto* button : { &quantizeButton_, &constrainButton_, &humanizeButton_, &legatoButton_, &reverseButton_ })
         addAndMakeVisible (button);
 
+    addAndMakeVisible (slideLabel_);
+    addAndMakeVisible (slide_);
+    slide_.setRange (-12.0, 12.0, 0.1);
+    slide_.setSliderStyle (juce::Slider::LinearHorizontal);
+    slide_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 48, 20);
+    slide_.onDragEnd = [this]
+    {
+        if (! hasClip_ || selected_ < 0 || onCommit == nullptr)
+            return;
+
+        auto notes = clip_.notes;
+
+        if (selected_ >= static_cast<int> (notes.size()))
+            return;
+
+        notes[static_cast<std::size_t> (selected_)].slideSemitones = static_cast<float> (slide_.getValue());
+        onCommit (std::move (notes));
+    };
+
     const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 
     for (int note = 0; note < 12; ++note)
@@ -140,6 +159,8 @@ void PianoRoll::resized()
     humanizeButton_.setBounds (382, 2, 84, 24);
     legatoButton_.setBounds (470, 2, 68, 24);
     reverseButton_.setBounds (542, 2, 72, 24);
+    slideLabel_.setBounds (624, 2, 40, 24);
+    slide_.setBounds (664, 2, 160, 24);
 }
 
 void PianoRoll::transform (std::vector<waveform::MidiNote> notes)
@@ -228,6 +249,9 @@ void PianoRoll::mouseDown (const juce::MouseEvent& event)
     before_ = edit_;
     bool edge = false;
     selected_ = noteAt (event.getPosition(), edge);
+
+    if (selected_ >= 0 && selected_ < static_cast<int> (edit_.size()))
+        slide_.setValue (edit_[static_cast<std::size_t> (selected_)].slideSemitones, juce::dontSendNotification);
 
     if (event.y > getHeight() - kVelocity && selected_ >= 0)
     {

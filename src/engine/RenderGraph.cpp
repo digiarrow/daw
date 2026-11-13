@@ -60,6 +60,7 @@ int collectTrackNotes (const RenderTrack& track,
             views[viewCount].velocity = note.velocity;
             views[viewCount].startQuarterNotes = note.startQuarterNotes;
             views[viewCount].lengthQuarterNotes = note.lengthQuarterNotes;
+            views[viewCount].slideSemitones = note.slideSemitones;
             ++viewCount;
         }
 
@@ -94,6 +95,7 @@ int collectTrackNotes (const RenderTrack& track,
             destination[count].velocity = note.velocity;
             destination[count].onsetSeconds = onset;
             destination[count].releaseSeconds = release;
+            destination[count].slideSemitones = note.slideSemitones;
             ++count;
         }
     }
@@ -182,6 +184,8 @@ GraphBuildResult buildGraph (const Project& project,
             rendered.chains.push_back (std::move (chain));
         }
 
+        rendered.modulator = track.modulator;
+
         if (track.type == TrackType::Midi)
         {
             for (const auto& clipValue : track.clips)
@@ -202,6 +206,7 @@ GraphBuildResult buildGraph (const Project& project,
                     renderedNote.velocity = note.velocity;
                     renderedNote.startQuarterNotes = note.startQuarterNotes;
                     renderedNote.lengthQuarterNotes = note.lengthQuarterNotes;
+                    renderedNote.slideSemitones = note.slideSemitones;
                     renderedClip.notes.push_back (renderedNote);
                 }
 
@@ -319,6 +324,7 @@ GraphBuildResult buildGraph (const Project& project,
                     renderedNote.velocity = note.velocity;
                     renderedNote.startQuarterNotes = note.startQuarterNotes;
                     renderedNote.lengthQuarterNotes = note.lengthQuarterNotes;
+                    renderedNote.slideSemitones = note.slideSemitones;
                     destination.notes.push_back (renderedNote);
                 }
             }
@@ -457,7 +463,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         BlockScratch* scratch,
                         SessionVoice* session,
                         int sessionCount,
-                        ExternalInsert* external) noexcept
+                        ExternalInsert* external,
+                        double* lfoPhase) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -544,6 +551,9 @@ void renderLinearBlock (const RenderGraph* graph,
                 for (const auto& lane : track.automation)
                     if (lane.parameter == "mixer.gainDb")
                         decibels = automationAt (lane, quarter, decibels);
+
+                if (lfoPhase != nullptr && track.modulator.enabled && track.modulator.target == "mixer.gainDb")
+                    decibels += std::sin (lfoPhase[trackCount]) * track.modulator.depth;
 
                 mixTrack.gain = dbToLinear (decibels);
             }
@@ -729,6 +739,20 @@ void renderLinearBlock (const RenderGraph* graph,
 
             if (loop > 0)
                 session[index].playhead %= loop;
+        }
+    }
+
+    if (lfoPhase != nullptr && graph != nullptr && sampleRate > 0.0)
+    {
+        const int count = std::min (static_cast<int> (graph->tracks.size()), kMaxTracks);
+
+        for (int index = 0; index < count; ++index)
+        {
+            if (! graph->tracks[static_cast<std::size_t> (index)].modulator.enabled)
+                continue;
+
+            lfoPhase[index] += graph->tracks[static_cast<std::size_t> (index)].modulator.rateHz * 6.283185307179586 * frames / sampleRate;
+            lfoPhase[index] = std::fmod (lfoPhase[index], 6.283185307179586);
         }
     }
 

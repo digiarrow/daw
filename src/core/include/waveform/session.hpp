@@ -14,6 +14,7 @@ struct SessionNoteView
     int velocity = 100;
     double startQuarterNotes = 0.0;
     double lengthQuarterNotes = 0.25;
+    float slideSemitones = 0.0f;
 };
 
 struct SessionAudioPiece

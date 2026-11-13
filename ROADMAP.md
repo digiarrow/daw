@@ -20,7 +20,7 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 
 ### Phase 1 status
 
-You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Known issues: groups and sends are edited from the engine API more than from a mixer strip; MPE, LFOs, and audio-to-MIDI are not buttons yet.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Known issues: groups and sends still have less of a mixer strip than the device rack; autosave and recent projects are not in yet.
 
 ## Phase 2 — partial
 
@@ -37,12 +37,12 @@ Warp playback uses Signalsmith Stretch. Comp segments switch takes. The rack edi
 
 - [done] The piano roll highlights the chosen major or minor key. **In key**, **Humanize**, **Legato**, and **Reverse** edit the open clip.
 - [done] Reverse, legato, and a deterministic humanize.
-- [done] MPE pitch ratio (`mpeFrequencyRatio`). Per-note slide is not yet a field on `MidiNote` in the piano roll.
-- [done] An LFO value that advances with the block size.
+- [done] MPE slide. The piano-roll **Slide** slider sets semitones on the selected note, and the synth, FM, and drum voices follow it.
+- [done] **LFO** assigns a sine to the selected track's volume, with rate and depth.
 
 ### Phase 3 status
 
-Key highlight and the four note tools are in the piano roll. MPE slide is still only a frequency-ratio function, and the LFO is not a modulator control.
+Key tools, MPE slide, and a volume LFO are in the window.
 
 ## Phase 4 — partial
 
@@ -57,9 +57,9 @@ Synth, sampler, FM, and drum are selectable. Chorus and saturator exist as inser
 
 - [done] **Script** opens a console for `tempo` and `add audio|midi`.
 - [done] **MIDI map** learns the next controller and applies it to the selected track's volume.
-- [done] Monophonic audio-to-MIDI by autocorrelation.
+- [done] **Audio to MIDI** turns the selected audio clip's pitch into a MIDI note.
 - [skipped] Stem separation with an open-source neural model. No model weights are shipped or downloaded. This needs a model the user chooses and a place to run it.
 
 ### Phase 5 status
 
-The script console and MIDI-learn window are in the app. Audio-to-MIDI is still a library call, not a button. Stem separation stays skipped until a model is chosen. Link stays skipped.
+The script console, MIDI-learn window, and audio-to-MIDI button are in the app. Stem separation stays skipped until a model is chosen. Link stays skipped.

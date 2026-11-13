@@ -87,6 +87,8 @@ private:
     void openPluginEditor();
     void showScriptConsole();
     void showRackEditor();
+    void showLfo();
+    void convertAudioToMidi();
     void showMidiMap();
     void applyLearnedControl();
 
@@ -131,6 +133,8 @@ private:
     juce::TextButton automationButton_ { "Volume lane" };
     juce::TextButton scriptButton_ { "Script" };
     juce::TextButton rackButton_ { "Rack" };
+    juce::TextButton lfoButton_ { "LFO" };
+    juce::TextButton audioToMidiButton_ { "Audio to MIDI" };
     juce::TextButton midiMapButton_ { "MIDI map" };
 
     juce::ToggleButton loopButton_ { "Loop" };

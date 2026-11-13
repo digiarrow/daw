@@ -32,6 +32,7 @@ void consider (const SessionNoteView& note,
     destination[count].velocity = note.velocity;
     destination[count].onsetSeconds = (blockOffsetQuarters + (noteStart - windowStart)) * secondsPerQuarter;
     destination[count].releaseSeconds = (blockOffsetQuarters + (noteEnd - windowStart)) * secondsPerQuarter;
+    destination[count].slideSemitones = note.slideSemitones;
     ++count;
 }
 

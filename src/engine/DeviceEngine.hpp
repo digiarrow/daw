@@ -259,6 +259,7 @@ private:
     juce::String activeMidi_;
     std::array<SynthVoiceMemory, 64> synthMemory_ {};
     std::array<SessionVoice, 64> session_ {};
+    std::array<double, 64> lfoPhase_ {};
     std::array<std::atomic<int>, 64> sessionActive_ {};
     std::array<std::atomic<int>, 64> sessionPending_ {};
     LiveSlot live_[128] {};

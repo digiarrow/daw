@@ -32,6 +32,7 @@ struct RenderMidiNote
     int velocity = 100;
     double startQuarterNotes = 0.0;
     double lengthQuarterNotes = 1.0;
+    float slideSemitones = 0.0f;
 };
 
 struct RenderSamplerZone
@@ -75,6 +76,7 @@ struct RenderTrack
     EffectSlot effects[kMaxInserts] {};
     int effectCount = 0;
     std::vector<RackChain> chains;
+    Modulator modulator;
     bool sampler = false;
     InstrumentKind instrument = InstrumentKind::Synth;
     std::vector<RenderSamplerZone> zones;
@@ -195,6 +197,7 @@ void renderLinearBlock (const RenderGraph* graph,
                         BlockScratch* scratch = nullptr,
                         SessionVoice* session = nullptr,
                         int sessionCount = 0,
-                        ExternalInsert* external = nullptr) noexcept;
+                        ExternalInsert* external = nullptr,
+                        double* lfoPhase = nullptr) noexcept;
 
 } // namespace waveform

@@ -999,7 +999,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                                            metronome_, false, nullptr, &structureOverflow_, &schedule,
                                            frames <= scratchFrames_ ? &blockScratch_ : nullptr,
                                            session_.data(), static_cast<int> (session_.size()),
-                                           externalPtr);
+                                           externalPtr, lfoPhase_.data());
                         local += piece;
                     }
 

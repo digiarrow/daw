@@ -237,7 +237,7 @@ void renderVoices (const SoundingNote* notes, int noteCount, int frames, double 
     {
         const auto& note = notes[index];
         const float velocity = static_cast<float> (std::clamp (note.velocity, 1, 127)) / 127.0f;
-        const double frequency = 440.0 * std::pow (2.0, (static_cast<double> (note.note) - 69.0) / 12.0);
+        const double frequency = 440.0 * std::pow (2.0, (static_cast<double> (note.note) + note.slideSemitones - 69.0) / 12.0);
         const int first = std::clamp (static_cast<int> (std::floor (note.onsetSeconds * sampleRate)), 0, frames);
         const int last = std::clamp (static_cast<int> (std::ceil ((note.releaseSeconds + patch.releaseSeconds) * sampleRate)), 0, frames);
 

@@ -995,6 +995,32 @@ void SetRackCommand::revert (Project& project)
 
 const char* SetRackCommand::name() const { return "Rack"; }
 
+SetModulatorCommand::SetModulatorCommand (std::string trackId, Modulator modulator)
+    : trackId_ (std::move (trackId)), next_ (modulator)
+{
+}
+
+void SetModulatorCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->modulator;
+    track->modulator = next_;
+}
+
+void SetModulatorCommand::revert (Project& project)
+{
+    if (applied_)
+        if (auto* track = findTrack (project, trackId_))
+            track->modulator = previous_;
+}
+
+const char* SetModulatorCommand::name() const { return "Modulator"; }
+
 SetInstrumentCommand::SetInstrumentCommand (std::string trackId, InstrumentKind instrument)
     : trackId_ (std::move (trackId)), next_ (instrument)
 {

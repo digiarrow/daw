@@ -63,6 +63,8 @@ private:
     juce::TextButton humanizeButton_ { "Humanize" };
     juce::TextButton legatoButton_ { "Legato" };
     juce::TextButton reverseButton_ { "Reverse" };
+    juce::Slider slide_;
+    juce::Label slideLabel_ { {}, "Slide" };
     int keyRoot_ = 0;
     bool minorKey_ = false;
 
