@@ -767,6 +767,32 @@ MainComponent::MainComponent()
         refreshHistoryButtons();
         setStatus ("Group created. The selected track now feeds it.");
     };
+    mixerButton_.onClick = [this]
+    {
+        showMixer_ = ! showMixer_;
+        mixerButton_.setToggleState (showMixer_, juce::dontSendNotification);
+        mixer_.setVisible (showMixer_);
+        trackViewport_.setVisible (! showMixer_);
+        resized();
+    };
+    mixerButton_.setClickingTogglesState (true);
+    mixer_.onMixer = [this] (const std::string& id, waveform::MixerState state)
+    {
+        if (auto* track = waveform::findTrack (project_, id))
+            state.pan = track->mixer.pan;
+
+        history_.execute (project_, std::make_unique<waveform::SetMixerCommand> (id, state));
+        syncEngine();
+        refreshHistoryButtons();
+        rebuildTracks();
+    };
+    mixer_.onSend = [this] (const std::string& id, waveform::Send send)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetSendCommand> (id, 0, send));
+        syncEngine();
+        refreshHistoryButtons();
+    };
+    mixer_.setVisible (false);
     addReturnButton_.onClick = [this]
     {
         const auto count = std::count_if (project_.tracks.begin(), project_.tracks.end(),
@@ -823,10 +849,10 @@ MainComponent::MainComponent()
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
              &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
-             &loadDemoButton_, &openButton_, &recentButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &addReturnButton_, &loopButton_, &metronomeButton_, &toneButton_,
+             &loadDemoButton_, &openButton_, &recentButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &addReturnButton_, &mixerButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_, &lfoButton_, &audioToMidiButton_,
-             &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &trackViewport_ })
+             &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &mixer_, &trackViewport_ })
     {
         addAndMakeVisible (component);
         silenceFocus (*component);
@@ -959,6 +985,8 @@ void MainComponent::resized()
     makeGroupButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (4);
     addReturnButton_.setBounds (trackHeader.removeFromLeft (100));
+    trackHeader.removeFromLeft (4);
+    mixerButton_.setBounds (trackHeader.removeFromLeft (72));
     trackHeader.removeFromLeft (6);
     arrangementButton_.setBounds (trackHeader.removeFromLeft (110));
     trackHeader.removeFromLeft (4);
@@ -1004,6 +1032,7 @@ void MainComponent::resized()
     browser_.setBounds (area.removeFromLeft (220));
     area.removeFromLeft (8);
     trackViewport_.setBounds (area);
+    mixer_.setBounds (area);
 
     auto master = masterBounds_.reduced (12, 10);
     auto meters = master.removeFromRight (180);
@@ -1024,6 +1053,14 @@ void MainComponent::timerCallback()
 {
     refreshTransportReadout();
     engine_.maintenance();
+
+    std::vector<float> peaks;
+    peaks.reserve (project_.tracks.size());
+
+    for (int index = 0; index < static_cast<int> (project_.tracks.size()); ++index)
+        peaks.push_back (engine_.trackPeak (index));
+
+    mixer_.setPeaks (peaks);
 
     if (++autosaveTicks_ >= 30 * 30)
     {
@@ -1265,6 +1302,8 @@ void MainComponent::rebuildTracks()
         trackList_.addAndMakeVisible (row.get());
         rows_.push_back (std::move (row));
     }
+
+    mixer_.setProject (project_);
 
     resized();
     refreshHistoryButtons();

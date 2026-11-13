@@ -134,6 +134,7 @@ public:
     [[nodiscard]] std::vector<std::string> warnings() const { return warnings_; }
     [[nodiscard]] int deviceGeneration() const noexcept;
     [[nodiscard]] double currentSampleRate() const noexcept;
+    [[nodiscard]] float trackPeak (int trackIndex) const noexcept;
 
     [[nodiscard]] AudioFileInfo probeFile (const std::string& utf8Path) const;
 
@@ -208,6 +209,7 @@ private:
     std::atomic<std::uint32_t> peakLeftBits_ { 0 };
     std::atomic<std::uint32_t> peakRightBits_ { 0 };
     std::atomic<std::uint32_t> cpuBits_ { 0 };
+    std::array<std::atomic<std::uint32_t>, 64> trackPeakBits_ {};
     std::atomic<int> latencySamples_ { 0 };
     std::atomic<int> metronomeFlag_ { 0 };
     std::atomic<int> testToneFlag_ { 0 };

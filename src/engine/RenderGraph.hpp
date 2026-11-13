@@ -199,6 +199,7 @@ void renderLinearBlock (const RenderGraph* graph,
                         SessionVoice* session = nullptr,
                         int sessionCount = 0,
                         ExternalInsert* external = nullptr,
-                        double* lfoPhase = nullptr) noexcept;
+                        double* lfoPhase = nullptr,
+                        float* trackPeaks = nullptr) noexcept;
 
 } // namespace waveform

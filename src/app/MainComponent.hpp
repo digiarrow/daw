@@ -3,6 +3,7 @@
 #include "ArrangementView.hpp"
 #include "BrowserPanel.hpp"
 #include "DeviceStrip.hpp"
+#include "MixerView.hpp"
 #include "DeviceEngine.hpp"
 #include "PianoRoll.hpp"
 #include "RackEditor.hpp"
@@ -127,6 +128,7 @@ private:
     juce::TextButton addEffectButton_ { "Add effect" };
     juce::TextButton makeGroupButton_ { "Make Group" };
     juce::TextButton addReturnButton_ { "Add Return" };
+    juce::TextButton mixerButton_ { "Mixer" };
     juce::TextButton collectButton_ { "Collect" };
     juce::TextButton exportButton_ { "Export WAV" };
     juce::TextButton loadDemoButton_ { "Load Demo" };
@@ -160,6 +162,7 @@ private:
 
     BrowserPanel browser_;
     DeviceStrip deviceStrip_;
+    MixerView mixer_;
     ArrangementView arrangement_;
     SessionView session_;
     PianoRoll pianoRoll_;
@@ -188,6 +191,7 @@ private:
     std::string selectedClipId_;
     bool showSession_ = false;
     bool showAutomation_ = true;
+    bool showMixer_ = false;
     std::array<int, 64> sessionActive_ {};
     std::array<int, 64> sessionPending_ {};
     std::string armedTrackId_;

@@ -468,7 +468,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         SessionVoice* session,
                         int sessionCount,
                         ExternalInsert* external,
-                        double* lfoPhase) noexcept
+                        double* lfoPhase,
+                        float* trackPeaks) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -661,6 +662,16 @@ void renderLinearBlock (const RenderGraph* graph,
             endpoints[index].sendGain[1] = source.sendGain[1];
             endpoints[index].sendPre[0] = source.sendPre[0];
             endpoints[index].sendPre[1] = source.sendPre[1];
+
+            if (trackPeaks != nullptr)
+            {
+                float peak = 0.0f;
+
+                for (int frame = 0; frame < frames; ++frame)
+                    peak = std::max (peak, std::max (std::abs (scratch->trackLeft[index][frame]), std::abs (scratch->trackRight[index][frame])));
+
+                trackPeaks[index] = std::max (trackPeaks[index], peak);
+            }
             busCount = std::max (busCount, source.outputBus + 1);
         }
 

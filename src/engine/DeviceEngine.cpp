@@ -460,6 +460,14 @@ PlaybackInfo DeviceEngine::playbackInfo() const
     return info;
 }
 
+float DeviceEngine::trackPeak (int trackIndex) const noexcept
+{
+    if (trackIndex < 0 || trackIndex >= 64)
+        return 0.0f;
+
+    return loadFloat (trackPeakBits_[static_cast<std::size_t> (trackIndex)]);
+}
+
 int DeviceEngine::deviceGeneration() const noexcept
 {
     return deviceGeneration_.load (std::memory_order_relaxed);
@@ -848,6 +856,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
     juce::ScopedNoDenormals noDenormals;
     juce::ignoreUnused (inputChannelData, numInputChannels);
     const double callbackStarted = juce::Time::getMillisecondCounterHiRes();
+    float trackPeaks[64] {};
 
     for (int channel = 0; channel < numOutputChannels; ++channel)
         if (outputChannelData[channel] != nullptr)
@@ -1002,7 +1011,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                                            metronome_, false, nullptr, &structureOverflow_, &schedule,
                                            frames <= scratchFrames_ ? &blockScratch_ : nullptr,
                                            session_.data(), static_cast<int> (session_.size()),
-                                           externalPtr, lfoPhase_.data());
+                                           externalPtr, lfoPhase_.data(), trackPeaks);
                         local += piece;
                     }
 
@@ -1103,6 +1112,9 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
         if (directStereo)
             break;
     }
+
+    for (int index = 0; index < 64; ++index)
+        storeFloat (trackPeakBits_[static_cast<std::size_t> (index)], trackPeaks[index]);
 
     storeFloat (peakLeftBits_, peakLeft);
     storeFloat (peakRightBits_, peakRight);

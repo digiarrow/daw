@@ -186,6 +186,7 @@ target_sources(WaveformStudio PRIVATE
     src/app/BrowserPanel.cpp
     src/app/DeviceStrip.cpp
     src/app/Main.cpp
+    src/app/MixerView.cpp
     src/app/MainComponent.cpp
     src/app/PianoRoll.cpp
     src/app/RackEditor.cpp
