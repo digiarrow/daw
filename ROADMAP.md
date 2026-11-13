@@ -14,14 +14,14 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 - [partial] Mixer groups, sends, routing, and inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator). **Add Delay** and **Make Group** are in the window. Other inserts are stored on the track and processed in the engine.
 - [partial] Sampler. Zones render at the played pitch when a track's instrument is `sampler`.
 - [partial] Automation. A `mixer.gainDb` lane is applied per block. Lanes round-trip in the project file.
-- [partial] Session launch. Quantize-to-beat and quantize-to-bar are tested. The clip-grid window is not built.
+- [done] Session clip grid. **Session** switches with **Arrangement**. Double-click an empty slot to create a clip, click to launch, the scene number launches the row, and **Arrangement** on a column returns that track to the timeline. Launch timing is immediate, next beat, or next bar. A launched clip loops and replaces arrangement clips on that track. Right-click clears a slot. MIDI slots edit in the piano roll.
 - [partial] Collect and WAV export. **Collect** fills `Media/`. **Export WAV** bounces 8 seconds. There is no browser pane.
 - [partial] Plugin delay compensation. `compensateDelay` is the delay line. A VST3 plugin is not loaded in the audio callback yet.
 - [skipped for this increment] In-window VST3 browser. JUCE can host VST3; wiring a scanner into the callback is the remaining step, and it was not finished here.
 
 ### Phase 1 status
 
-You can record MIDI, edit it, record audio, and play both. You can route a track into a group and insert a delay. Known issues: delay time is capped near 170 ms; live MIDI is one buffer late; export is a fixed 8 seconds from the saved file; the session grid and VST3 slot are not in the window.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay, and launch session clips on a quantize grid. Known issues: delay time is capped near 170 ms; live MIDI is one buffer late; export is a fixed 8 seconds from the saved file; a VST3 slot is not in the window.
 
 ## Phase 2 — partial
 

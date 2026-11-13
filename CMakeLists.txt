@@ -111,6 +111,7 @@ add_library(waveform_core STATIC
     src/core/src/commands.cpp
     src/core/src/later.cpp
     src/core/src/sampler.cpp
+    src/core/src/session.cpp
     src/core/src/effects.cpp
     src/core/src/midi.cpp
     src/core/src/routing.cpp
@@ -173,6 +174,7 @@ target_sources(WaveformStudio PRIVATE
     src/app/Main.cpp
     src/app/MainComponent.cpp
     src/app/PianoRoll.cpp
+    src/app/SessionView.cpp
 )
 target_include_directories(WaveformStudio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/app")
 target_compile_definitions(WaveformStudio PRIVATE "WAVEFORM_EXAMPLES_DIR=\"${WAVEFORM_EXAMPLES_DIR_CMAKE}\"")
@@ -201,6 +203,7 @@ if(WAVEFORM_BUILD_TESTS)
         tests/test_effects.cpp
         tests/test_later.cpp
         tests/test_sampler.cpp
+        tests/test_session.cpp
         tests/test_midi.cpp
         tests/test_mix.cpp
         tests/test_project.cpp

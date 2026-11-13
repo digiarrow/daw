@@ -2,6 +2,7 @@
 
 #include "RenderGraph.hpp"
 #include "waveform/queue.hpp"
+#include "waveform/session.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/transport.hpp"
 
@@ -103,6 +104,11 @@ public:
     bool setTestTone (bool enabled);
     bool seekQuarterNotes (double quarterNotes);
 
+    /// `scene` of -1 returns the track to the arrangement. `quantize` is 0 now, 1 next beat, 2 next bar.
+    bool launchSession (int trackIndex, int scene, int quantize);
+    [[nodiscard]] int sessionScene (int trackIndex) const noexcept;
+    [[nodiscard]] int sessionPending (int trackIndex) const noexcept;
+
     /// Enables one MIDI input. An empty id disables input. Message thread only.
     void setMidiInput (const juce::String& deviceIdentifier);
     void setMonitorTrack (int trackIndex) noexcept;
@@ -147,6 +153,10 @@ private:
     void closeOpenMidiNotes() noexcept;
     int collectLiveNotes (SoundingNote* destination, int capacity) const noexcept;
     void advanceLiveNotes (int frames) noexcept;
+    void applySession (const EngineCommand& command) noexcept;
+    void fireSession (std::int64_t timelineSample) noexcept;
+    [[nodiscard]] std::int64_t nextSessionSample (std::int64_t after) const noexcept;
+    void publishSession() noexcept;
 
     void publishGraph (std::shared_ptr<const RenderGraph> graph);
     const RenderGraph* acquireGraph() noexcept;
@@ -230,6 +240,9 @@ private:
     SpscQueue<IncomingMidi, 256> midiQueue_;
     juce::String activeMidi_;
     std::array<SynthVoiceMemory, 64> synthMemory_ {};
+    std::array<SessionVoice, 64> session_ {};
+    std::array<std::atomic<int>, 64> sessionActive_ {};
+    std::array<std::atomic<int>, 64> sessionPending_ {};
     LiveSlot live_[128] {};
     RecordedMidiSlot midiSlots_[kMaxRecordedNotes] {};
     int midiCount_ = 0;

@@ -4,6 +4,7 @@
 #include "waveform/effects.hpp"
 #include "waveform/project.hpp"
 #include "waveform/routing.hpp"
+#include "waveform/session.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/synthesis.hpp"
 
@@ -47,10 +48,23 @@ struct RenderMidiClip
     std::vector<RenderMidiNote> notes;
 };
 
+struct RenderSessionSlot
+{
+    bool used = false;
+    bool midi = false;
+    std::shared_ptr<const ClipAudio> audio;
+    double offsetSeconds = 0.0;
+    double lengthSeconds = 0.0;
+    float gain = 1.0f;
+    double lengthQuarterNotes = 4.0;
+    std::vector<RenderMidiNote> notes;
+};
+
 struct RenderTrack
 {
     std::vector<RenderClip> clips;
     std::vector<RenderMidiClip> midiClips;
+    RenderSessionSlot session[kSessionScenes] {};
     SynthPatch patch;
     bool isMidi = false;
     bool group = false;
@@ -151,6 +165,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         Oscillator* tone,
                         std::atomic<int>* overflowCount,
                         SynthSchedule* synth,
-                        BlockScratch* scratch = nullptr) noexcept;
+                        BlockScratch* scratch = nullptr,
+                        SessionVoice* session = nullptr,
+                        int sessionCount = 0) noexcept;
 
 } // namespace waveform

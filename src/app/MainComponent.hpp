@@ -3,12 +3,14 @@
 #include "ArrangementView.hpp"
 #include "DeviceEngine.hpp"
 #include "PianoRoll.hpp"
+#include "SessionView.hpp"
 #include "waveform/commands.hpp"
 #include "waveform/project.hpp"
 
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -110,6 +112,8 @@ private:
     juce::TextButton loadDemoButton_ { "Load Demo" };
     juce::TextButton openButton_ { "Open" };
     juce::TextButton saveButton_ { "Save" };
+    juce::TextButton arrangementButton_ { "Arrangement" };
+    juce::TextButton sessionButton_ { "Session" };
 
     juce::ToggleButton loopButton_ { "Loop" };
     juce::ToggleButton metronomeButton_ { "Click" };
@@ -123,8 +127,10 @@ private:
     juce::ComboBox bufferBox_;
     juce::ComboBox countInBox_;
     juce::ComboBox midiInputBox_;
+    juce::ComboBox launchBox_;
 
     ArrangementView arrangement_;
+    SessionView session_;
     PianoRoll pianoRoll_;
 
     juce::Viewport trackViewport_;
@@ -140,6 +146,9 @@ private:
 
     std::string selectedTrackId_;
     std::string selectedClipId_;
+    bool showSession_ = false;
+    std::array<int, 64> sessionActive_ {};
+    std::array<int, 64> sessionPending_ {};
     std::string armedTrackId_;
     std::vector<juce::String> midiInputIds_;
     int seenRecordEpoch_ = 0;

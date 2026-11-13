@@ -1,8 +1,12 @@
 #include "DeviceEngine.hpp"
 
+#include "waveform/automation.hpp"
 #include "waveform/midi.hpp"
 #include "waveform/mix.hpp"
+#include "waveform/session.hpp"
 #include "waveform/timing.hpp"
+
+#include <limits>
 
 #include <algorithm>
 #include <cmath>
@@ -36,7 +40,14 @@ float clampSample (float sample) noexcept
 
 } // namespace
 
-DeviceEngine::DeviceEngine() = default;
+DeviceEngine::DeviceEngine()
+{
+    for (auto& active : sessionActive_)
+        active.store (-1, std::memory_order_relaxed);
+
+    for (auto& pending : sessionPending_)
+        pending.store (-2, std::memory_order_relaxed);
+}
 
 DeviceEngine::~DeviceEngine()
 {
@@ -193,6 +204,105 @@ void DeviceEngine::prepareAudioCapture (double maxSeconds)
     }
 
     recordCapacity_ = static_cast<int> (recordLeft_.size());
+}
+
+bool DeviceEngine::launchSession (int trackIndex, int scene, int quantize)
+{
+    if (trackIndex < 0 || trackIndex >= 64 || scene < -1 || scene >= kSessionScenes)
+        return false;
+
+    EngineCommand command;
+    command.type = EngineCommandType::LaunchSession;
+    command.a = trackIndex;
+    command.b = scene;
+    command.c = std::clamp (quantize, 0, 2);
+    return push (command);
+}
+
+int DeviceEngine::sessionScene (int trackIndex) const noexcept
+{
+    if (trackIndex < 0 || trackIndex >= 64)
+        return -1;
+
+    return sessionActive_[static_cast<std::size_t> (trackIndex)].load (std::memory_order_relaxed);
+}
+
+int DeviceEngine::sessionPending (int trackIndex) const noexcept
+{
+    if (trackIndex < 0 || trackIndex >= 64)
+        return -2;
+
+    return sessionPending_[static_cast<std::size_t> (trackIndex)].load (std::memory_order_relaxed);
+}
+
+void DeviceEngine::applySession (const EngineCommand& command) noexcept
+{
+    if (command.type != EngineCommandType::LaunchSession)
+        return;
+
+    const int track = command.a;
+
+    if (track < 0 || track >= 64 || command.b < -1 || command.b >= kSessionScenes)
+        return;
+
+    auto& voice = session_[static_cast<std::size_t> (track)];
+    const int quantize = static_cast<int> (command.c);
+
+    if (quantize == 0 || transport_.state() != TransportState::Playing || ! (transport_.sampleRate() > 0.0))
+    {
+        voice.pending = -2;
+        voice.active = command.b;
+        voice.playhead = 0;
+        return;
+    }
+
+    const auto quant = quantize == 2 ? LaunchQuantize::Bar : LaunchQuantize::Beat;
+    const double next = nextLaunchQuarter (transport_.musicalPosition().quarterNotes, quant, transport_.timeSignature());
+    const auto sample = Timing::samplesFromQuarterNotes (next, transport_.sampleRate(), transport_.tempoBpm());
+
+    if (sample <= transport_.positionSamples())
+    {
+        voice.pending = -2;
+        voice.active = command.b;
+        voice.playhead = 0;
+        return;
+    }
+
+    voice.pending = command.b;
+    voice.pendingSample = sample;
+}
+
+void DeviceEngine::fireSession (std::int64_t timelineSample) noexcept
+{
+    for (auto& voice : session_)
+    {
+        if (voice.pending != -2 && timelineSample >= voice.pendingSample)
+        {
+            voice.active = voice.pending;
+            voice.playhead = 0;
+            voice.pending = -2;
+        }
+    }
+}
+
+std::int64_t DeviceEngine::nextSessionSample (std::int64_t after) const noexcept
+{
+    auto next = std::numeric_limits<std::int64_t>::max();
+
+    for (const auto& voice : session_)
+        if (voice.pending != -2 && voice.pendingSample > after)
+            next = std::min (next, voice.pendingSample);
+
+    return next;
+}
+
+void DeviceEngine::publishSession() noexcept
+{
+    for (int index = 0; index < 64; ++index)
+    {
+        sessionActive_[static_cast<std::size_t> (index)].store (session_[static_cast<std::size_t> (index)].active, std::memory_order_relaxed);
+        sessionPending_[static_cast<std::size_t> (index)].store (session_[static_cast<std::size_t> (index)].pending, std::memory_order_relaxed);
+    }
 }
 
 bool DeviceEngine::startRecording (int trackIndex, int countInBars, bool midi)
@@ -352,10 +462,12 @@ void DeviceEngine::applyLocal (const EngineCommand& command) noexcept
     {
         case EngineCommandType::SetMetronome: metronome_ = command.a != 0; break;
         case EngineCommandType::SetTestTone:  testToneEnabled_ = command.a != 0; break;
+        case EngineCommandType::LaunchSession: applySession (command); break;
         default:                              transport_.apply (command); break;
     }
 
     publishInfo();
+    publishSession();
 }
 
 void DeviceEngine::drainCommands() noexcept
@@ -375,6 +487,13 @@ void DeviceEngine::drainCommands() noexcept
             case EngineCommandType::Stop:
                 transport_.apply (command);
                 finishRecording();
+
+                for (auto& voice : session_)
+                    voice.playhead = 0;
+
+                break;
+            case EngineCommandType::LaunchSession:
+                applySession (command);
                 break;
             case EngineCommandType::StartRecord:
                 if (! recording_ && ! countingIn_)
@@ -759,10 +878,28 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                 int offset = done;
                 transport_.advance (remain, [&] (std::int64_t start, int count)
                 {
-                    renderLinearBlock (graph, rate, tempo, signature, start, count,
-                                       left + offset, right + offset,
-                                       metronome_, false, nullptr, &structureOverflow_, &schedule,
-                                       frames <= scratchFrames_ ? &blockScratch_ : nullptr);
+                    int local = 0;
+
+                    while (local < count)
+                    {
+                        fireSession (start + local);
+                        const auto boundary = nextSessionSample (start + local);
+                        int piece = count - local;
+
+                        if (boundary > start + local && boundary - (start + local) < piece)
+                            piece = static_cast<int> (boundary - (start + local));
+
+                        if (piece <= 0)
+                            break;
+
+                        renderLinearBlock (graph, rate, tempo, signature, start + local, piece,
+                                           left + offset + local, right + offset + local,
+                                           metronome_, false, nullptr, &structureOverflow_, &schedule,
+                                           frames <= scratchFrames_ ? &blockScratch_ : nullptr,
+                                           session_.data(), static_cast<int> (session_.size()));
+                        local += piece;
+                    }
+
                     offset += count;
                 });
             }
@@ -810,6 +947,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
         }
 
         advanceLiveNotes (frames);
+        publishSession();
         return std::pair<float, float> (peakLeft, peakRight);
     };
 

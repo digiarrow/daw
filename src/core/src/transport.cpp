@@ -139,6 +139,7 @@ void Transport::apply (const EngineCommand& command) noexcept
         case EngineCommandType::SetMetronome:
         case EngineCommandType::SetTestTone:
         case EngineCommandType::StartRecord:
+        case EngineCommandType::LaunchSession:
             break;
     }
 }

@@ -468,6 +468,122 @@ void RemoveClipCommand::revert (Project& project)
 
 const char* RemoveClipCommand::name() const { return "Remove Clip"; }
 
+SetSessionSlotCommand::SetSessionSlotCommand (std::string trackId, int scene, Clip clip)
+    : trackId_ (std::move (trackId)), scene_ (std::clamp (scene, 0, kSessionScenes - 1)), next_ (std::move (clip))
+{
+    if (auto* midi = std::get_if<MidiClip> (&next_))
+    {
+        if (midi->id.empty())
+            midi->id = makeId();
+
+        if (midi->name.empty())
+            midi->name = "Scene";
+
+        if (! (midi->lengthQuarterNotes > 0.0))
+            midi->lengthQuarterNotes = 4.0;
+    }
+
+    if (auto* audio = std::get_if<AudioClip> (&next_))
+    {
+        if (audio->id.empty())
+            audio->id = makeId();
+
+        if (audio->name.empty())
+            audio->name = "Scene";
+    }
+}
+
+const std::string& SetSessionSlotCommand::clipId() const
+{
+    return waveform::clipId (next_);
+}
+
+void SetSessionSlotCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    hadPrevious_ = false;
+
+    for (const auto& slot : track->session)
+    {
+        if (slot.scene == scene_)
+        {
+            previous_ = slot;
+            hadPrevious_ = true;
+            break;
+        }
+    }
+
+    track->session.erase (std::remove_if (track->session.begin(), track->session.end(),
+                                          [&] (const SessionSlot& slot) { return slot.scene == scene_; }),
+                          track->session.end());
+    track->session.push_back (SessionSlot { scene_, next_ });
+}
+
+void SetSessionSlotCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+    {
+        track->session.erase (std::remove_if (track->session.begin(), track->session.end(),
+                                              [&] (const SessionSlot& slot) { return slot.scene == scene_; }),
+                              track->session.end());
+
+        if (hadPrevious_)
+            track->session.push_back (previous_);
+    }
+}
+
+const char* SetSessionSlotCommand::name() const { return "Session Slot"; }
+
+ClearSessionSlotCommand::ClearSessionSlotCommand (std::string trackId, int scene)
+    : trackId_ (std::move (trackId)), scene_ (std::clamp (scene, 0, kSessionScenes - 1))
+{
+}
+
+void ClearSessionSlotCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = false;
+
+    if (track == nullptr)
+        return;
+
+    for (const auto& slot : track->session)
+    {
+        if (slot.scene == scene_)
+        {
+            previous_ = slot;
+            applied_ = true;
+            break;
+        }
+    }
+
+    if (! applied_)
+        return;
+
+    track->session.erase (std::remove_if (track->session.begin(), track->session.end(),
+                                          [&] (const SessionSlot& slot) { return slot.scene == scene_; }),
+                          track->session.end());
+}
+
+void ClearSessionSlotCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        track->session.push_back (previous_);
+}
+
+const char* ClearSessionSlotCommand::name() const { return "Clear Scene"; }
+
 namespace
 {
 
@@ -480,6 +596,10 @@ MidiClip* findMidiClip (Project& project, const std::string& trackId, const std:
 
     for (auto& candidate : track->clips)
         if (auto* midi = std::get_if<MidiClip> (&candidate); midi != nullptr && midi->id == clip)
+            return midi;
+
+    for (auto& slot : track->session)
+        if (auto* midi = std::get_if<MidiClip> (&slot.clip); midi != nullptr && midi->id == clip)
             return midi;
 
     return nullptr;

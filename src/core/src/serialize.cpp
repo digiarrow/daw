@@ -282,6 +282,22 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
     for (const auto& clip : node.at ("clips"))
         track.clips.push_back (clipFromJson (clip, track.type, ids));
 
+    if (node.contains ("session") && node.at ("session").is_array())
+    {
+        for (const auto& slotNode : node.at ("session"))
+        {
+            requireObject (slotNode, "session slot");
+            SessionSlot slot;
+            slot.scene = std::clamp (requireInt (slotNode, "scene"), 0, kSessionScenes - 1);
+
+            if (! slotNode.contains ("clip"))
+                fail ("session slot is missing a clip");
+
+            slot.clip = clipFromJson (slotNode.at ("clip"), track.type, ids);
+            track.session.push_back (std::move (slot));
+        }
+    }
+
     if (track.type == TrackType::Midi && node.contains ("synth"))
         track.synth = synthFromJson (node.at ("synth"));
 
@@ -420,11 +436,17 @@ json trackToJson (const Track& track)
     for (const auto& clip : track.clips)
         clips.push_back (clipToJson (clip));
 
+    json session = json::array();
+
+    for (const auto& slot : track.session)
+        session.push_back (json { { "clip", clipToJson (slot.clip) }, { "scene", slot.scene } });
+
     json trackJson = {
         { "clips", std::move (clips) },
         { "id", track.id },
         { "mixer", mixerToJson (track.mixer) },
         { "name", track.name },
+        { "session", std::move (session) },
         { "type", track.type == TrackType::Audio ? "audio" : "midi" }
     };
 

@@ -82,6 +82,15 @@ struct MidiClip
 
 using Clip = std::variant<AudioClip, MidiClip>;
 
+inline constexpr int kSessionScenes = 8;
+
+/// A clip that lives in the session grid. `scene` is the row, 0 .. kSessionScenes-1.
+struct SessionSlot
+{
+    int scene = 0;
+    Clip clip;
+};
+
 struct Send
 {
     std::string targetId = "master";
@@ -117,6 +126,7 @@ struct Track
     std::vector<Send> sends;
     std::vector<EffectSlot> effects;
     std::vector<Clip> clips;
+    std::vector<SessionSlot> session;
 };
 
 struct Project

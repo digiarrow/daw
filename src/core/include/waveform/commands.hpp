@@ -310,6 +310,39 @@ private:
     bool applied_ = false;
 };
 
+class SetSessionSlotCommand : public EditCommand
+{
+public:
+    SetSessionSlotCommand (std::string trackId, int scene, Clip clip);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+    [[nodiscard]] const std::string& clipId() const;
+
+private:
+    std::string trackId_;
+    int scene_ = 0;
+    Clip next_;
+    SessionSlot previous_ {};
+    bool hadPrevious_ = false;
+    bool applied_ = false;
+};
+
+class ClearSessionSlotCommand : public EditCommand
+{
+public:
+    ClearSessionSlotCommand (std::string trackId, int scene);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    int scene_ = 0;
+    SessionSlot previous_ {};
+    bool applied_ = false;
+};
+
 class RemoveClipCommand : public EditCommand
 {
 public:

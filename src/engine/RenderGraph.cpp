@@ -5,6 +5,7 @@
 #include "waveform/paths.hpp"
 #include "waveform/routing.hpp"
 #include "waveform/sampler.hpp"
+#include "waveform/session.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/timing.hpp"
 
@@ -21,6 +22,82 @@ constexpr int kMaxClips = 256;
 constexpr float kMetronomeGain = 0.85f;
 constexpr float kTestToneGain = 0.15f;
 constexpr double kTestToneFrequency = 440.0;
+
+int collectTrackNotes (const RenderTrack& track,
+                       int trackIndex,
+                       const SessionVoice* session,
+                       int sessionCount,
+                       std::int64_t timelineStart,
+                       int frames,
+                       double sampleRate,
+                       double tempoBpm,
+                       SoundingNote* destination,
+                       int capacity,
+                       bool& overflow) noexcept
+{
+    if (destination == nullptr || capacity <= 0)
+        return 0;
+
+    const int scene = session != nullptr && trackIndex < sessionCount ? session[trackIndex].active : -1;
+    const bool launched = scene >= 0 && scene < kSessionScenes && track.session[scene].used && track.session[scene].midi;
+
+    if (launched)
+    {
+        SessionNoteView views[128];
+        int viewCount = 0;
+
+        for (const auto& note : track.session[scene].notes)
+        {
+            if (viewCount >= 128)
+            {
+                overflow = true;
+                break;
+            }
+
+            views[viewCount].note = note.note;
+            views[viewCount].velocity = note.velocity;
+            views[viewCount].startQuarterNotes = note.startQuarterNotes;
+            views[viewCount].lengthQuarterNotes = note.lengthQuarterNotes;
+            ++viewCount;
+        }
+
+        const double samplesPerQuarter = sampleRate * 60.0 / tempoBpm;
+        const double playhead = samplesPerQuarter > 0.0 ? static_cast<double> (session[trackIndex].playhead) / samplesPerQuarter : 0.0;
+        const double block = samplesPerQuarter > 0.0 ? static_cast<double> (frames) / samplesPerQuarter : 0.0;
+        return appendSessionNotes (views, viewCount, playhead, block, track.session[scene].lengthQuarterNotes,
+                                   60.0 / tempoBpm, destination, 0, capacity);
+    }
+
+    const double blockStart = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
+    const double secondsPerQuarter = 60.0 / tempoBpm;
+    int count = 0;
+
+    for (const auto& clip : track.midiClips)
+    {
+        for (const auto& note : clip.notes)
+        {
+            if (count >= capacity)
+            {
+                overflow = true;
+                return count;
+            }
+
+            const double onset = (clip.startQuarterNotes + note.startQuarterNotes - blockStart) * secondsPerQuarter;
+            const double release = onset + note.lengthQuarterNotes * secondsPerQuarter;
+
+            if (release + track.patch.releaseSeconds < 0.0 || onset > static_cast<double> (frames) / sampleRate)
+                continue;
+
+            destination[count].note = note.note;
+            destination[count].velocity = note.velocity;
+            destination[count].onsetSeconds = onset;
+            destination[count].releaseSeconds = release;
+            ++count;
+        }
+    }
+
+    return count;
+}
 
 } // namespace
 
@@ -138,6 +215,53 @@ GraphBuildResult buildGraph (const Project& project,
             }
         }
 
+        for (const auto& slot : track.session)
+        {
+            if (slot.scene < 0 || slot.scene >= kSessionScenes)
+                continue;
+
+            auto& destination = rendered.session[slot.scene];
+
+            if (const auto* midi = std::get_if<MidiClip> (&slot.clip))
+            {
+                destination.used = true;
+                destination.midi = true;
+                destination.lengthQuarterNotes = midi->lengthQuarterNotes;
+
+                for (const auto& note : midi->notes)
+                {
+                    RenderMidiNote renderedNote;
+                    renderedNote.note = note.note;
+                    renderedNote.velocity = note.velocity;
+                    renderedNote.startQuarterNotes = note.startQuarterNotes;
+                    renderedNote.lengthQuarterNotes = note.lengthQuarterNotes;
+                    destination.notes.push_back (renderedNote);
+                }
+            }
+            else if (const auto* audioClip = std::get_if<AudioClip> (&slot.clip))
+            {
+                auto location = pathFromUtf8 (audioClip->file);
+
+                if (projectFile != nullptr && ! location.is_absolute())
+                    location = resolveAudioPath (*projectFile, audioClip->file);
+
+                std::string error;
+                auto audio = library.load (pathToUtf8 (location), sampleRate, error);
+
+                if (audio == nullptr)
+                {
+                    result.warnings.push_back (track.name + " scene: " + error);
+                    continue;
+                }
+
+                destination.used = true;
+                destination.audio = std::move (audio);
+                destination.offsetSeconds = audioClip->offsetSeconds;
+                destination.lengthSeconds = audioClip->lengthSeconds;
+                destination.gain = dbToLinear (audioClip->gainDb);
+            }
+        }
+
         graph->tracks.push_back (std::move (rendered));
     }
 
@@ -234,7 +358,9 @@ void renderLinearBlock (const RenderGraph* graph,
                         Oscillator* tone,
                         std::atomic<int>* overflowCount,
                         SynthSchedule* synth,
-                        BlockScratch* scratch) noexcept
+                        BlockScratch* scratch,
+                        SessionVoice* session,
+                        int sessionCount) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -256,29 +382,55 @@ void renderLinearBlock (const RenderGraph* graph,
             }
 
             const int clipBegin = clipCursor;
+            const int scene = session != nullptr && trackCount < sessionCount ? session[trackCount].active : -1;
+            const bool launched = scene >= 0 && scene < kSessionScenes && track.session[scene].used;
 
-            for (const auto& clip : track.clips)
+            if (launched && ! track.session[scene].midi && track.session[scene].audio != nullptr)
             {
-                if (clipCursor >= kMaxClips)
+                const auto& slot = track.session[scene];
+                const auto loopFrames = std::max<std::int64_t> (0, std::llround (slot.lengthSeconds * sampleRate));
+                const auto fileOffset = std::max<std::int64_t> (0, std::llround (slot.offsetSeconds * slot.audio->sampleRate));
+                const auto playhead = session[trackCount].playhead;
+                SessionAudioPiece pieces[2];
+                const int pieceCount = sessionAudioPieces (timelineStart, frames, playhead, loopFrames, fileOffset, pieces);
+
+                for (int piece = 0; piece < pieceCount && clipCursor < kMaxClips; ++piece)
                 {
-                    overflow = true;
-                    break;
+                    auto& view = clipViews[clipCursor++];
+                    view.source.left = slot.audio->left.data();
+                    view.source.right = slot.audio->right.empty() ? nullptr : slot.audio->right.data();
+                    view.source.frames = slot.audio->frames();
+                    view.timelineStartFrame = pieces[piece].timelineStartFrame;
+                    view.sourceOffsetFrame = pieces[piece].sourceOffsetFrame;
+                    view.timelineLengthFrames = pieces[piece].timelineLengthFrames;
+                    view.gain = slot.gain;
                 }
+            }
+            else if (! launched)
+            {
+                for (const auto& clip : track.clips)
+                {
+                    if (clipCursor >= kMaxClips)
+                    {
+                        overflow = true;
+                        break;
+                    }
 
-                if (clip.audio == nullptr || clip.audio->left.empty())
-                    continue;
+                    if (clip.audio == nullptr || clip.audio->left.empty())
+                        continue;
 
-                if (std::abs (clip.audio->sampleRate - sampleRate) > 1.0)
-                    continue;
+                    if (std::abs (clip.audio->sampleRate - sampleRate) > 1.0)
+                        continue;
 
-                auto& view = clipViews[clipCursor++];
-                view.source.left = clip.audio->left.data();
-                view.source.right = clip.audio->right.empty() ? nullptr : clip.audio->right.data();
-                view.source.frames = clip.audio->frames();
-                view.timelineStartFrame = Timing::samplesFromQuarterNotes (clip.startQuarterNotes, sampleRate, tempoBpm);
-                view.sourceOffsetFrame = std::max<std::int64_t> (0, std::llround (clip.offsetSeconds * clip.audio->sampleRate));
-                view.timelineLengthFrames = std::max<std::int64_t> (0, std::llround (clip.lengthSeconds * clip.audio->sampleRate));
-                view.gain = clip.gain;
+                    auto& view = clipViews[clipCursor++];
+                    view.source.left = clip.audio->left.data();
+                    view.source.right = clip.audio->right.empty() ? nullptr : clip.audio->right.data();
+                    view.source.frames = clip.audio->frames();
+                    view.timelineStartFrame = Timing::samplesFromQuarterNotes (clip.startQuarterNotes, sampleRate, tempoBpm);
+                    view.sourceOffsetFrame = std::max<std::int64_t> (0, std::llround (clip.offsetSeconds * clip.audio->sampleRate));
+                    view.timelineLengthFrames = std::max<std::int64_t> (0, std::llround (clip.lengthSeconds * clip.audio->sampleRate));
+                    view.gain = clip.gain;
+                }
             }
 
             auto& mixTrack = tracks[trackCount++];
@@ -343,28 +495,13 @@ void renderLinearBlock (const RenderGraph* graph,
             if (synth != nullptr && synth->memories != nullptr && source.isMidi)
             {
                 SoundingNote sounding[128];
-                int noteCount = 0;
-                const double blockStart = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
-                const double secondsPerQuarter = 60.0 / tempoBpm;
+                int noteCount = collectTrackNotes (source, index, session, sessionCount, timelineStart, frames,
+                                                   sampleRate, tempoBpm, sounding, 128, overflow);
+                const bool arrangement = session == nullptr || index >= sessionCount || session[index].active < 0;
 
-                for (const auto& clip : source.midiClips)
-                    for (const auto& note : clip.notes)
-                    {
-                        if (noteCount >= 128)
-                            break;
-
-                        const double onset = (clip.startQuarterNotes + note.startQuarterNotes - blockStart) * secondsPerQuarter;
-                        const double release = onset + note.lengthQuarterNotes * secondsPerQuarter;
-
-                        if (release + source.patch.releaseSeconds < 0.0 || onset > static_cast<double> (frames) / sampleRate)
-                            continue;
-
-                        sounding[noteCount].note = note.note;
-                        sounding[noteCount].velocity = note.velocity;
-                        sounding[noteCount].onsetSeconds = onset;
-                        sounding[noteCount].releaseSeconds = release;
-                        ++noteCount;
-                    }
+                if (arrangement && synth->liveTrack == index && synth->liveNotes != nullptr)
+                    for (int live = 0; live < synth->liveNoteCount && noteCount < 128; ++live)
+                        sounding[noteCount++] = synth->liveNotes[live];
 
                 renderTrackInstrument (source, sounding, noteCount, frames, sampleRate, synth->memories[index],
                                       1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index]);
@@ -421,8 +558,6 @@ void renderLinearBlock (const RenderGraph* graph,
             if (track.solo)
                 anySolo = true;
 
-        const double blockStart = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
-        const double secondsPerQuarter = 60.0 / tempoBpm;
         SoundingNote sounding[128];
 
         for (int trackIndex = 0; trackIndex < static_cast<int> (graph->tracks.size()) && trackIndex < synth->memoryCount; ++trackIndex)
@@ -432,38 +567,13 @@ void renderLinearBlock (const RenderGraph* graph,
             if (! track.isMidi || track.mute || (anySolo && ! track.solo))
                 continue;
 
-            int count = 0;
+            int count = collectTrackNotes (track, trackIndex, session, sessionCount, timelineStart, frames,
+                                           sampleRate, tempoBpm, sounding, 128, overflow);
+            const bool arrangement = session == nullptr || trackIndex >= sessionCount || session[trackIndex].active < 0;
 
-            for (const auto& clip : track.midiClips)
-            {
-                for (const auto& note : clip.notes)
-                {
-                    if (count >= 128)
-                    {
-                        overflow = true;
-                        break;
-                    }
-
-                    const double onsetQuarter = clip.startQuarterNotes + note.startQuarterNotes;
-                    const double onset = (onsetQuarter - blockStart) * secondsPerQuarter;
-                    const double release = onset + note.lengthQuarterNotes * secondsPerQuarter;
-
-                    if (release + track.patch.releaseSeconds < 0.0 || onset > static_cast<double> (frames) / sampleRate)
-                        continue;
-
-                    sounding[count].note = note.note;
-                    sounding[count].velocity = note.velocity;
-                    sounding[count].onsetSeconds = onset;
-                    sounding[count].releaseSeconds = release;
-                    ++count;
-                }
-            }
-
-            if (synth->liveTrack == trackIndex && synth->liveNotes != nullptr)
-            {
+            if (arrangement && synth->liveTrack == trackIndex && synth->liveNotes != nullptr)
                 for (int live = 0; live < synth->liveNoteCount && count < 128; ++live)
                     sounding[count++] = synth->liveNotes[live];
-            }
 
             const PanGains pan = constantPowerPan (track.pan);
             renderTrackInstrument (track, sounding, count, frames, sampleRate, synth->memories[trackIndex],
@@ -475,6 +585,30 @@ void renderLinearBlock (const RenderGraph* graph,
 
     if (overflow && overflowCount != nullptr)
         overflowCount->store (1, std::memory_order_relaxed);
+
+    if (session != nullptr && graph != nullptr && tempoBpm > 0.0 && Timing::isValidSampleRate (sampleRate))
+    {
+        const int count = std::min (sessionCount, static_cast<int> (graph->tracks.size()));
+
+        for (int index = 0; index < count; ++index)
+        {
+            if (session[index].active < 0 || session[index].active >= kSessionScenes)
+                continue;
+
+            const auto& slot = graph->tracks[static_cast<std::size_t> (index)].session[session[index].active];
+            std::int64_t loop = 0;
+
+            if (slot.midi)
+                loop = Timing::samplesFromQuarterNotes (slot.lengthQuarterNotes, sampleRate, tempoBpm);
+            else if (slot.used)
+                loop = std::max<std::int64_t> (0, std::llround (slot.lengthSeconds * sampleRate));
+
+            session[index].playhead += frames;
+
+            if (loop > 0)
+                session[index].playhead %= loop;
+        }
+    }
 
     if (metronome)
         renderMetronome (left, right, timelineStart, frames, sampleRate, tempoBpm, signature, kMetronomeGain);

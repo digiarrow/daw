@@ -300,6 +300,115 @@ MainComponent::MainComponent()
         refreshHistoryButtons();
     };
     pianoRoll_.onCommit = [this] (std::vector<waveform::MidiNote> notes) { commitNotes (std::move (notes)); };
+    launchBox_.addItem ("Launch now", 1);
+    launchBox_.addItem ("Launch beat", 2);
+    launchBox_.addItem ("Launch bar", 3);
+    launchBox_.setSelectedId (3, juce::dontSendNotification);
+    arrangementButton_.onClick = [this]
+    {
+        showSession_ = false;
+        arrangement_.setVisible (true);
+        session_.setVisible (false);
+        resized();
+    };
+    sessionButton_.onClick = [this]
+    {
+        showSession_ = true;
+        arrangement_.setVisible (false);
+        session_.setVisible (true);
+        resized();
+    };
+    session_.onLaunch = [this] (int track, int scene)
+    {
+        const int quantize = std::max (0, launchBox_.getSelectedId() - 1);
+        engine_.launchSession (track, scene, quantize);
+        setStatus (quantize == 0 ? "Scene launched." : quantize == 1 ? "Scene waits for the next beat." : "Scene waits for the next bar.");
+    };
+    session_.onLaunchScene = [this] (int scene)
+    {
+        const int quantize = std::max (0, launchBox_.getSelectedId() - 1);
+
+        for (int track = 0; track < static_cast<int> (project_.tracks.size()); ++track)
+            engine_.launchSession (track, scene, quantize);
+
+        setStatus ("Scene row launched.");
+    };
+    session_.onReturn = [this] (int track)
+    {
+        engine_.launchSession (track, -1, 0);
+        setStatus ("Track follows the arrangement again.");
+    };
+    session_.onCreate = [this] (int track, int scene)
+    {
+        if (track < 0 || track >= static_cast<int> (project_.tracks.size()))
+            return;
+
+        const auto& source = project_.tracks[static_cast<std::size_t> (track)];
+
+        if (source.type == waveform::TrackType::Midi)
+        {
+            waveform::MidiClip clip;
+            clip.name = "Scene " + std::to_string (scene + 1);
+            clip.lengthQuarterNotes = static_cast<double> (project_.timeSignature.numerator);
+            auto command = std::make_unique<waveform::SetSessionSlotCommand> (source.id, scene, clip);
+            selectedTrackId_ = source.id;
+            selectedClipId_ = command->clipId();
+            history_.execute (project_, std::move (command));
+        }
+        else
+        {
+            const waveform::AudioClip* existing = nullptr;
+
+            for (const auto& candidate : source.clips)
+                if (const auto* audio = std::get_if<waveform::AudioClip> (&candidate))
+                    existing = audio;
+
+            if (existing == nullptr)
+            {
+                setStatus ("Add an audio file on this track before filling the slot.");
+                return;
+            }
+
+            waveform::AudioClip clip = *existing;
+            clip.id.clear();
+            clip.name = existing->name;
+            auto command = std::make_unique<waveform::SetSessionSlotCommand> (source.id, scene, clip);
+            selectedTrackId_ = source.id;
+            selectedClipId_ = command->clipId();
+            history_.execute (project_, std::move (command));
+        }
+
+        syncEngine();
+        rebuildTracks();
+        refreshHistoryButtons();
+        refreshPiano();
+        setStatus ("Session slot created. Double-click it to launch.");
+    };
+    session_.onSelect = [this] (int track, int scene)
+    {
+        if (track < 0 || track >= static_cast<int> (project_.tracks.size()))
+            return;
+
+        selectedTrackId_ = project_.tracks[static_cast<std::size_t> (track)].id;
+
+        for (const auto& slot : project_.tracks[static_cast<std::size_t> (track)].session)
+            if (slot.scene == scene)
+                selectedClipId_ = waveform::clipId (slot.clip);
+
+        rebuildSelection();
+        refreshPiano();
+    };
+    session_.onClear = [this] (int track, int scene)
+    {
+        if (track < 0 || track >= static_cast<int> (project_.tracks.size()))
+            return;
+
+        history_.execute (project_, std::make_unique<waveform::ClearSessionSlotCommand> (project_.tracks[static_cast<std::size_t> (track)].id, scene));
+        engine_.launchSession (track, -1, 0);
+        syncEngine();
+        refreshHistoryButtons();
+        refreshPiano();
+    };
     deviceButton_.onClick = [this] { showDeviceSettings(); };
     undoButton_.onClick = [this] { undo(); };
     redoButton_.onClick = [this] { redo(); };
@@ -368,7 +477,8 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &arrangement_, &pianoRoll_, &trackViewport_ })
+             &countInBox_, &midiInputBox_, &launchBox_, &arrangementButton_, &sessionButton_,
+             &arrangement_, &session_, &pianoRoll_, &trackViewport_ })
     {
         addAndMakeVisible (component);
         silenceFocus (*component);
@@ -376,6 +486,7 @@ MainComponent::MainComponent()
 
     bpmSlider_.setWantsKeyboardFocus (true);
     masterSlider_.setWantsKeyboardFocus (true);
+    session_.setVisible (false);
     trackViewport_.setViewedComponent (&trackList_, false);
     trackViewport_.setScrollBarsShown (true, false);
 
@@ -494,6 +605,12 @@ void MainComponent::resized()
     addDelayButton_.setBounds (trackHeader.removeFromLeft (90));
     trackHeader.removeFromLeft (6);
     makeGroupButton_.setBounds (trackHeader.removeFromLeft (100));
+    trackHeader.removeFromLeft (6);
+    arrangementButton_.setBounds (trackHeader.removeFromLeft (110));
+    trackHeader.removeFromLeft (4);
+    sessionButton_.setBounds (trackHeader.removeFromLeft (84));
+    trackHeader.removeFromLeft (4);
+    launchBox_.setBounds (trackHeader.removeFromLeft (110));
     exportButton_.setBounds (trackHeader.removeFromRight (96));
     trackHeader.removeFromRight (6);
     collectButton_.setBounds (trackHeader.removeFromRight (80));
@@ -509,8 +626,10 @@ void MainComponent::resized()
     area.removeFromBottom (8);
     pianoRoll_.setBounds (area.removeFromBottom (260));
     area.removeFromBottom (8);
-    const int arrangementHeight = std::clamp (22 + static_cast<int> (project_.tracks.size()) * 32, 120, 240);
-    arrangement_.setBounds (area.removeFromTop (arrangementHeight));
+    const int arrangementHeight = std::clamp (22 + static_cast<int> (project_.tracks.size()) * 32, 180, 280);
+    auto timeline = area.removeFromTop (arrangementHeight);
+    arrangement_.setBounds (timeline);
+    session_.setBounds (timeline);
     area.removeFromTop (8);
     trackViewport_.setBounds (area);
 
@@ -1060,6 +1179,14 @@ void MainComponent::refreshArrangement()
     const double rate = info.sampleRate > 0 ? info.sampleRate : 48000.0;
     const double quarter = waveform::Timing::quarterNotesFromSamples (info.positionSamples, rate, info.tempoBpm);
     arrangement_.setState (&project_, quarter, selectedClipId_, armedTrackId_);
+
+    for (int index = 0; index < 64; ++index)
+    {
+        sessionActive_[static_cast<std::size_t> (index)] = engine_.sessionScene (index);
+        sessionPending_[static_cast<std::size_t> (index)] = engine_.sessionPending (index);
+    }
+
+    session_.setState (&project_, sessionActive_, sessionPending_, selectedClipId_);
     const std::string monitorId = armedTrackId_.empty() ? selectedTrackId_ : armedTrackId_;
     int monitor = -1;
 
@@ -1079,9 +1206,16 @@ void MainComponent::refreshPiano()
     const waveform::MidiClip* clip = nullptr;
 
     if (auto* track = waveform::findTrack (project_, selectedTrackId_))
+    {
         for (const auto& candidate : track->clips)
             if (const auto* midi = std::get_if<waveform::MidiClip> (&candidate); midi != nullptr && midi->id == selectedClipId_)
                 clip = midi;
+
+        if (clip == nullptr)
+            for (const auto& slot : track->session)
+                if (const auto* midi = std::get_if<waveform::MidiClip> (&slot.clip); midi != nullptr && midi->id == selectedClipId_)
+                    clip = midi;
+    }
 
     pianoRoll_.setClip (clip);
 }
