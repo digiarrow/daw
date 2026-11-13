@@ -2,6 +2,8 @@
 
 #include "waveform/effects.hpp"
 
+#include <string>
+
 namespace
 {
 
@@ -33,8 +35,12 @@ void RackEditor::setRack (waveform::DeviceRack rack)
         rack_.chains.push_back (chain);
     }
 
-    if (rack_.macros.empty())
-        rack_.macros.push_back ({});
+    while (rack_.macros.size() < 8)
+    {
+        waveform::DeviceMacro macro;
+        macro.name = "Macro " + std::to_string (rack_.macros.size() + 1);
+        rack_.macros.push_back (macro);
+    }
 
     chainIndex_ = std::clamp (chainIndex_, 0, static_cast<int> (rack_.chains.size()) - 1);
     refresh();
@@ -94,8 +100,16 @@ void RackEditor::refresh()
         }
     }
 
+    macroBox_.clear (juce::dontSendNotification);
+
+    for (int index = 0; index < static_cast<int> (rack_.macros.size()) && index < 8; ++index)
+        macroBox_.addItem (rack_.macros[static_cast<std::size_t> (index)].name, index + 1);
+
+    macroIndex_ = std::clamp (macroIndex_, 0, std::max (0, static_cast<int> (rack_.macros.size()) - 1));
+    macroBox_.setSelectedId (macroIndex_ + 1, juce::dontSendNotification);
+
     if (! rack_.macros.empty())
-        macro_.setValue (rack_.macros.front().value, juce::dontSendNotification);
+        macro_.setValue (rack_.macros[static_cast<std::size_t> (macroIndex_)].value, juce::dontSendNotification);
 }
 
 RackEditor::RackEditor()
@@ -107,6 +121,7 @@ RackEditor::RackEditor()
     addAndMakeVisible (addEffect_);
     addAndMakeVisible (removeEffect_);
     addAndMakeVisible (gain_);
+    addAndMakeVisible (macroBox_);
     addAndMakeVisible (macro_);
     addAndMakeVisible (mapMacro_);
     addAndMakeVisible (hint_);
@@ -222,17 +237,25 @@ RackEditor::RackEditor()
                 commit();
             }
     };
-    macro_.onValueChange = [this]
+    macroBox_.onChange = [this]
     {
-        if (updating_ || rack_.macros.empty())
+        if (updating_)
             return;
 
-        rack_.macros.front().value = macro_.getValue();
+        macroIndex_ = std::max (0, macroBox_.getSelectedId() - 1);
+        refresh();
+    };
+    macro_.onValueChange = [this]
+    {
+        if (updating_ || macroIndex_ < 0 || macroIndex_ >= static_cast<int> (rack_.macros.size()))
+            return;
+
+        rack_.macros[static_cast<std::size_t> (macroIndex_)].value = macro_.getValue();
         commit();
     };
     mapMacro_.onClick = [this]
     {
-        if (rack_.macros.empty() || effect() == nullptr)
+        if (macroIndex_ < 0 || macroIndex_ >= static_cast<int> (rack_.macros.size()) || effect() == nullptr)
             return;
 
         waveform::MacroAssignment assignment;
@@ -241,7 +264,7 @@ RackEditor::RackEditor()
         assignment.parameter = 0;
         assignment.minimum = parameters_[0].getMinimum();
         assignment.maximum = parameters_[0].getMaximum();
-        rack_.macros.front().assignments = { assignment };
+        rack_.macros[static_cast<std::size_t> (macroIndex_)].assignments = { assignment };
         commit();
     };
 }
@@ -272,7 +295,9 @@ void RackEditor::resized()
     }
 
     area.removeFromTop (8);
-    macro_.setBounds (area.removeFromTop (28));
+    auto macroRow = area.removeFromTop (28);
+    macroBox_.setBounds (macroRow.removeFromLeft (120));
+    macro_.setBounds (macroRow);
     area.removeFromTop (6);
     mapMacro_.setBounds (area.removeFromTop (28).removeFromLeft (160));
     hint_.setBounds (area.removeFromTop (40));

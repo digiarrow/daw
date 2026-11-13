@@ -26,7 +26,7 @@ You can record MIDI, edit it, record audio, and play both. You can route a track
 
 - [done] Warp markers time-stretch playback with [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) (MIT; Signalsmith Linear, also MIT, is vendored beside it). Ctrl-click an audio clip to add a marker. Pitch stays put while the duration follows the markers. Rubber Band was not used; its GPL licence does not fit this tree.
 - [done] Comp segments choose the take you hear. Shift-drop a file onto an audio clip to add a take. Alt-click paints a one-beat segment on the next take. Take 0 is the clip's own file.
-- [done] **Rack** opens an editor for up to four parallel chains, each with up to four effects, plus a macro mapped onto a parameter. Chains are mixed in the audio callback with preallocated scratch.
+- [done] **Rack** opens an editor for up to four parallel chains, each with up to four effects, and eight macros. Each macro can be mapped onto a parameter. Chains are mixed with preallocated scratch.
 - [skipped] Ableton Link. The official library is GPLv2 and is not vendored. `linkStatus()` is a stub that stays disabled until that licence is chosen on purpose.
 
 ### Phase 2 status

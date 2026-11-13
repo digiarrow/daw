@@ -24,6 +24,7 @@ private:
     waveform::DeviceRack rack_;
     int chainIndex_ = 0;
     int effectIndex_ = 0;
+    int macroIndex_ = 0;
     bool updating_ = false;
 
     juce::ComboBox chainBox_;
@@ -34,6 +35,7 @@ private:
     juce::TextButton removeEffect_ { "Remove effect" };
     juce::Slider gain_;
     juce::Slider parameters_[4];
+    juce::ComboBox macroBox_;
     juce::Slider macro_;
     juce::TextButton mapMacro_ { "Map macro to P1" };
     juce::Label hint_;
