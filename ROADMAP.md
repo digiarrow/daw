@@ -1,51 +1,66 @@
 # Roadmap
 
-Clean-room work. Mac and Windows are the targets that matter; Linux is exercised in CI. Nothing here copies another product's code, artwork, presets, or samples.
+Clean-room work. macOS and Windows are the targets that matter; Linux is what CI runs. This project does not copy another product's code, artwork, presets, or samples.
 
-Status values: done, partial, skipped.
+Status: done, partial, skipped.
 
-## Phase 0
+## Phase 0 — done
 
-- [done] Device, transport, project JSON, undo, audio clips, metronome, test tone.
+Device, transport, JSON project, undo, audio clips, metronome, test tone.
 
 ## Phase 1
 
-- [done] MIDI input, recording, piano roll, arrangement timeline, count-in, audio recording.
-- [done] Built-in polyphonic synth.
-- [partial] Mixer groups, sends, and routing. Tracks can feed a group or the master, with two sends and insert slots. Built-in inserts: EQ, compressor, delay, reverb, limiter, utility, chorus, saturator. The window can insert a delay and make a group; the other inserts are in the project file.
-- [ ] VST3 hosting and plugin delay compensation.
-- [ ] Automation lanes.
-- [ ] Session clip grid with quantized launch.
-- [partial] Simple sampler. Zones play from a file at the right pitch. Load a zone by putting it in the project; the engine renders it instead of the synth when `instrument` is `sampler`.
-- [partial] Automation lanes. `mixer.gainDb` is applied per block. Other parameters are stored and round-trip.
-- [partial] Session launch timing. `nextLaunchQuarter` snaps to the beat or the bar. The clip grid UI is not in the window yet.
-- [partial] Browser, save-and-collect, WAV export. **Collect** copies clip and sampler files into `Media/` and rewrites paths. **Export WAV** bounces the saved project (8 seconds, current sample rate). A dedicated file browser pane is not in the window yet.
+- [done] MIDI input, recording, piano roll, arrangement, count-in, audio recording, built-in synth.
+- [partial] Mixer groups, sends, routing, and inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator). **Add Delay** and **Make Group** are in the window. Other inserts are stored on the track and processed in the engine.
+- [partial] Sampler. Zones render at the played pitch when a track's instrument is `sampler`.
+- [partial] Automation. A `mixer.gainDb` lane is applied per block. Lanes round-trip in the project file.
+- [partial] Session launch. Quantize-to-beat and quantize-to-bar are tested. The clip-grid window is not built.
+- [partial] Collect and WAV export. **Collect** fills `Media/`. **Export WAV** bounces 8 seconds. There is no browser pane.
+- [partial] Plugin delay compensation. `compensateDelay` is the delay line. A VST3 plugin is not loaded in the audio callback yet.
+- [skipped for this increment] In-window VST3 browser. JUCE can host VST3; wiring a scanner into the callback is the remaining step, and it was not finished here.
 
-## Phase 2
+### Phase 1 status
 
-- [ ] Warping and time-stretch.
-- [ ] Take comping.
-- [ ] Instrument and effect racks.
-- [skipped] Ableton Link. The official library is GPLv2; it is not vendored. A stub clock interface can be added when that licence is an explicit choice.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group and insert a delay. Known issues: delay time is capped near 170 ms; live MIDI is one buffer late; export is a fixed 8 seconds from the saved file; the session grid and VST3 slot are not in the window.
 
-## Phase 3
+## Phase 2 — partial
 
-- [ ] Scales and keys.
-- [ ] MIDI generators and transformations.
-- [ ] MPE.
-- [ ] Modulators.
+- [done] Warp marker interpolation (`warpedSourceSeconds`). Playback still uses the unwarped sample path unless a later change reads markers inside the clip renderer.
+- [done] Take comp selection (`compTakeAt`).
+- [done] Parallel effect racks (`mixRack`). It allocates, so it is for prepare/offline, not the audio callback.
+- [skipped] Ableton Link. The official library is GPLv2 and is not vendored. `linkStatus()` is a stub that stays disabled until that licence is chosen on purpose.
 
-## Phase 4
+### Phase 2 status
 
-- [ ] More original instruments and effects.
+The timing helpers are tested. The arrangement does not yet show warp markers, comp lanes, or racks. Link is an intentional skip.
 
-## Phase 5
+## Phase 3 — partial
 
-- [ ] Scripting API.
-- [ ] Control-surface mapping.
-- [skipped until a model is supplied] Stem separation with an open-source neural model. No model weights are downloaded in this repository.
-- [ ] Audio-to-MIDI.
+- [done] Major and minor key tests, and snapping a note into the key.
+- [done] Reverse, legato, and a deterministic humanize.
+- [done] MPE pitch ratio (`mpeFrequencyRatio`). Per-note slide is not yet a field on `MidiNote` in the piano roll.
+- [done] An LFO value that advances with the block size.
 
-## Phase 1 status
+### Phase 3 status
 
-Groups, sends, and the insert processors are in the engine and covered by tests. A selected track can gain a delay or be routed into a new group from the window. The sampler and volume automation are in the document and the renderer; launch quantize math is tested. VST3, the session grid UI, the browser, collect, and a one-click export are still open. Known issue: delay time is capped at about 170 ms because the delay line is fixed-size and real-time safe.
+Generators and key logic are library functions with tests. They are not buttons in the piano roll yet.
+
+## Phase 4 — partial
+
+- [done] FM oscillator and a simple drum voice (`fmSample`, `drumSample`), beside the existing synth, sampler, chorus, and saturator.
+- [ ] A window to play the FM and drum voices as track instruments.
+
+### Phase 4 status
+
+The voices exist and are tested. They are not selectable in the UI.
+
+## Phase 5 — partial
+
+- [done] A small project script: `tempo` and `add audio|midi`.
+- [done] MIDI CC 7 mapped to track gain.
+- [done] Monophonic audio-to-MIDI by autocorrelation.
+- [skipped] Stem separation with an open-source neural model. No model weights are shipped or downloaded. This needs a model the user chooses and a place to run it.
+
+### Phase 5 status
+
+Scripting, one control mapping, and monophonic audio-to-MIDI are tested library calls. There is no script console, no control-surface window, and no stem splitter.

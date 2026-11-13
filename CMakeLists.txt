@@ -109,6 +109,7 @@ add_library(waveform_core STATIC
     src/core/src/automation.cpp
     src/core/src/collect.cpp
     src/core/src/commands.cpp
+    src/core/src/later.cpp
     src/core/src/sampler.cpp
     src/core/src/effects.cpp
     src/core/src/midi.cpp
@@ -198,6 +199,7 @@ waveform_set_output_dirs(waveform-render)
 if(WAVEFORM_BUILD_TESTS)
     add_executable(waveform_tests
         tests/test_effects.cpp
+        tests/test_later.cpp
         tests/test_sampler.cpp
         tests/test_midi.cpp
         tests/test_mix.cpp

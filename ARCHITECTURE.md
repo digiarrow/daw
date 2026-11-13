@@ -103,4 +103,6 @@ The arrangement view and piano roll are message-thread components. They read the
 
 **Warp.** Keep the current unwarped path. A warp mode would map timeline quarter notes to source seconds with a breakpoint list evaluated on the message thread into a read cursor the callback can follow. Do not silently change the meaning of `lengthSeconds`.
 
-**Automation.** Sample-accurate breakpoints can live next to clips and be applied inside `renderLinearBlock`. Until then, faders are block-accurate because the graph is rebuilt between callbacks.
+**Automation.** A `mixer.gainDb` lane is read at the start of each block inside `renderLinearBlock`. Finer-than-block ramps are still future work.
+
+**Library pieces past the window.** `later.hpp` holds warp markers, comp segments, racks, key snapping, MIDI transforms, an LFO, FM and drum voices, a tiny script, one CC map, monophonic audio-to-MIDI, and the delay line for plugin delay compensation. See [ROADMAP.md](ROADMAP.md) for what is tested, what is not in the window, and what was skipped (Link, neural stem weights, a live VST3 slot).
