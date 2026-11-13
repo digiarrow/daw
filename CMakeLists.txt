@@ -171,6 +171,11 @@ target_link_libraries(waveform_engine
 )
 target_compile_features(waveform_engine PUBLIC cxx_std_20)
 
+if(APPLE)
+    # Audio Unit hosting references AUGenericView, which lives in these frameworks.
+    target_link_libraries(waveform_engine PUBLIC "-framework AudioUnit" "-framework CoreAudioKit")
+endif()
+
 function(waveform_set_output_dirs target)
     # Single-config generators write straight into bin/.
     # Visual Studio and Xcode append the configuration name themselves.
