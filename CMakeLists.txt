@@ -260,6 +260,25 @@ if(WAVEFORM_BUILD_TESTS)
     )
 endif()
 
+install(TARGETS WaveformStudio
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION .
+)
+
+set(CPACK_PACKAGE_NAME "WaveformStudio")
+set(CPACK_PACKAGE_VENDOR "Waveform Studio")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_FILE_NAME "WaveformStudio-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}")
+if(APPLE)
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "Waveform Studio")
+elseif(WIN32)
+    set(CPACK_GENERATOR "ZIP")
+else()
+    set(CPACK_GENERATOR "TGZ")
+endif()
+include(CPack)
+
 message(STATUS "Waveform Studio ${PROJECT_VERSION}")
 message(STATUS "  tests: ${WAVEFORM_BUILD_TESTS}")
 if(APPLE)

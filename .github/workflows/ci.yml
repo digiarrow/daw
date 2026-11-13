@@ -82,3 +82,34 @@ jobs:
         run: cmake --build build --config Release --parallel
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+  package-macos:
+    name: macOS disk image
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja
+        run: brew install ninja
+      - name: Package and ad-hoc sign
+        run: ./scripts/package-macos.sh
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveformStudio-macos
+          path: build-package/package/*.dmg
+          if-no-files-found: error
+
+  package-windows:
+    name: Windows zip
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package-windows.ps1
+      - name: Upload zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: WaveformStudio-windows
+          path: build-package/package/*.zip
+          if-no-files-found: error
