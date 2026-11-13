@@ -17,6 +17,10 @@ PluginHost::PluginHost()
 {
     formats_.addFormat (std::make_unique<juce::VST3PluginFormat>());
 
+#if JUCE_PLUGINHOST_AU
+    formats_.addFormat (std::make_unique<juce::AudioUnitPluginFormat>());
+#endif
+
     for (auto& binding : bindings_)
         binding.store (nullptr, std::memory_order_relaxed);
 }
@@ -33,30 +37,33 @@ PluginHost::~PluginHost()
 
 int PluginHost::scan()
 {
-    auto* format = formats_.getFormat (0);
-
-    if (format == nullptr)
-        return known_.getNumTypes();
-
-    const auto locations = format->getDefaultLocationsToSearch();
-    juce::FileSearchPath narrowed;
-
-    for (int index = 0; index < locations.getNumPaths(); ++index)
+    for (int formatIndex = 0; formatIndex < formats_.getNumFormats(); ++formatIndex)
     {
-        const auto path = locations[index];
+        auto* format = formats_.getFormat (formatIndex);
 
-        if (path.isDirectory())
-            narrowed.add (path);
-    }
+        if (format == nullptr)
+            continue;
 
-    if (narrowed.getNumPaths() == 0)
-        narrowed = locations;
+        const auto locations = format->getDefaultLocationsToSearch();
+        juce::FileSearchPath narrowed;
 
-    juce::PluginDirectoryScanner scanner (known_, *format, narrowed, true, juce::File(), true);
-    juce::String name;
+        for (int index = 0; index < locations.getNumPaths(); ++index)
+        {
+            const auto path = locations[index];
 
-    while (scanner.scanNextFile (true, name))
-    {
+            if (path.isDirectory())
+                narrowed.add (path);
+        }
+
+        if (narrowed.getNumPaths() == 0)
+            narrowed = locations;
+
+        juce::PluginDirectoryScanner scanner (known_, *format, narrowed, true, juce::File(), true);
+        juce::String name;
+
+        while (scanner.scanNextFile (true, name))
+        {
+        }
     }
 
     return known_.getNumTypes();

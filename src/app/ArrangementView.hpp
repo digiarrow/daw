@@ -6,6 +6,8 @@
 
 #include <functional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 class ArrangementView : public juce::Component,
                           public juce::DragAndDropTarget
@@ -21,6 +23,9 @@ public:
     std::function<void (const std::string& trackId, const std::string& clipId)> onSelectClip;
     std::function<void (const std::string& trackId)> onArmTrack;
     std::function<void (const std::string& trackId, const std::string& clipId, double startQuarterNotes)> onMoveClip;
+    std::function<void (const std::string& trackId, const std::string& clipId, double startQuarterNotes, double lengthQuarterNotes)> onResizeClip;
+    std::function<void (const std::string& trackId, const std::string& clipId, double fadeInSeconds, double fadeOutSeconds)> onFadeClip;
+    void setClipPeaks (std::unordered_map<std::string, std::vector<float>> peaks);
     std::function<void (const std::string& trackId, double startQuarterNotes)> onCreateMidiClip;
     std::function<void (double quarterNotes)> onSeek;
     std::function<void (bool enabled, double startQuarterNotes, double endQuarterNotes)> onLoopEdit;
@@ -48,6 +53,20 @@ private:
         bool loopEnd = false;
         bool ruler = false;
         bool arm = false;
+        bool trimStart = false;
+        bool trimEnd = false;
+        bool fadeIn = false;
+        bool fadeOut = false;
+    };
+
+    enum class DragKind
+    {
+        None,
+        Move,
+        TrimStart,
+        TrimEnd,
+        FadeIn,
+        FadeOut
     };
 
     [[nodiscard]] Hit findHit (juce::Point<int> position) const;
@@ -67,6 +86,12 @@ private:
     std::vector<waveform::AutomationPoint> automationEdit_;
 
     bool draggingClip_ = false;
+    DragKind dragKind_ = DragKind::None;
+    double previewLength_ = 1.0;
+    double originalLength_ = 1.0;
+    double previewFadeIn_ = 0.0;
+    double previewFadeOut_ = 0.0;
+    std::unordered_map<std::string, std::vector<float>> peaks_;
     bool draggingLoop_ = false;
     bool loopDragStart_ = false;
     double previewLoopStart_ = 0.0;

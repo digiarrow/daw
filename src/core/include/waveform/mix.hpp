@@ -45,6 +45,8 @@ struct AudioClipView
     std::int64_t timelineStartFrame = 0;
     std::int64_t sourceOffsetFrame = 0;
     std::int64_t timelineLengthFrames = 0;
+    std::int64_t fadeInFrames = 0;
+    std::int64_t fadeOutFrames = 0;
     float gain = 1.0f;
 };
 

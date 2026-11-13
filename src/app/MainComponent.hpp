@@ -3,6 +3,7 @@
 #include "ArrangementView.hpp"
 #include "BrowserPanel.hpp"
 #include "DeviceStrip.hpp"
+#include "MidiEffectBar.hpp"
 #include "MixerView.hpp"
 #include "DeviceEngine.hpp"
 #include "PianoRoll.hpp"
@@ -18,6 +19,7 @@
 #include <array>
 #include <filesystem>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 class MainComponent : public juce::Component,
@@ -81,6 +83,13 @@ private:
     void armTrack (const std::string& trackId);
     void selectClip (const std::string& trackId, const std::string& clipId);
     void moveClip (const std::string& trackId, const std::string& clipId, double startQuarterNotes);
+    void resizeClip (const std::string& trackId, const std::string& clipId, double startQuarterNotes, double lengthQuarterNotes);
+    void fadeClip (const std::string& trackId, const std::string& clipId, double fadeInSeconds, double fadeOutSeconds);
+    void deleteSelectedClip();
+    void splitSelectedClip();
+    void importMidi();
+    void exportMidi();
+    void setMidiEffects (std::vector<waveform::MidiEffect> effects);
     void createMidiClip (const std::string& trackId, double startQuarterNotes);
     void commitNotes (std::vector<waveform::MidiNote> notes);
     void record();
@@ -164,6 +173,7 @@ private:
     DeviceStrip deviceStrip_;
     MixerView mixer_;
     ArrangementView arrangement_;
+    MidiEffectBar midiEffectBar_;
     SessionView session_;
     PianoRoll pianoRoll_;
 
@@ -189,6 +199,8 @@ private:
 
     std::string selectedTrackId_;
     std::string selectedClipId_;
+    std::string peakSignature_;
+    std::unordered_map<std::string, std::vector<float>> clipPeaks_;
     bool showSession_ = false;
     bool showAutomation_ = true;
     bool showMixer_ = false;

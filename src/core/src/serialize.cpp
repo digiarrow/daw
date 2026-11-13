@@ -1,5 +1,6 @@
 #include "waveform/effects.hpp"
 #include "waveform/serialize.hpp"
+#include "waveform/midi_effects.hpp"
 #include "waveform/version.hpp"
 
 #if defined (__GNUC__)
@@ -101,6 +102,8 @@ json compToJson (const std::vector<CompSegment>& segments);
 json audioClipToJson (const AudioClip& clip)
 {
     return json {
+        { "fadeIn", clip.fadeInSeconds },
+        { "fadeOut", clip.fadeOutSeconds },
         { "file", clip.file },
         { "gainDb", clip.gainDb },
         { "id", clip.id },
@@ -199,6 +202,8 @@ AudioClip audioClipFromJson (const json& node, std::unordered_set<std::string>& 
     clip.offsetSeconds = requireNumber (node, "offsetSeconds");
     clip.lengthSeconds = requireNumber (node, "lengthSeconds");
     clip.gainDb = requireNumber (node, "gainDb");
+    clip.fadeInSeconds = node.contains ("fadeIn") ? std::max (0.0, requireNumber (node, "fadeIn")) : 0.0;
+    clip.fadeOutSeconds = node.contains ("fadeOut") ? std::max (0.0, requireNumber (node, "fadeOut")) : 0.0;
 
     if (clip.file.empty())
         fail ("audio clip '" + clip.id + "' has an empty file path");
@@ -370,6 +375,45 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
             plugin.name = requireString (pluginNode, "name");
             plugin.state = pluginNode.contains ("state") && pluginNode.at ("state").is_string() ? pluginNode.at ("state").get<std::string>() : std::string {};
             track.plugins.push_back (std::move (plugin));
+        }
+    }
+
+    if (node.contains ("midiEffects") && node.at ("midiEffects").is_array())
+    {
+        for (const auto& effectNode : node.at ("midiEffects"))
+        {
+            MidiEffect effect;
+            MidiEffectKind kind = MidiEffectKind::Pitch;
+
+            if (! midiEffectKindFromName (requireString (effectNode, "kind"), kind))
+                fail ("unknown MIDI effect");
+
+            effect.kind = kind;
+            effect.enabled = ! effectNode.contains ("enabled") || (effectNode.at ("enabled").is_boolean() && effectNode.at ("enabled").get<bool>());
+            effect.division = effectNode.contains ("division") ? requireInt (effectNode, "division") : 16;
+            effect.octaves = effectNode.contains ("octaves") ? requireInt (effectNode, "octaves") : 1;
+            effect.root = effectNode.contains ("root") ? requireInt (effectNode, "root") : 0;
+            effect.semitones = effectNode.contains ("semitones") ? requireInt (effectNode, "semitones") : 0;
+            effect.velocityAdd = effectNode.contains ("velocityAdd") ? requireInt (effectNode, "velocityAdd") : 0;
+            effect.velocityScale = effectNode.contains ("velocityScale") ? requireNumber (effectNode, "velocityScale") : 1.0;
+
+            if (effectNode.contains ("scale") && effectNode.at ("scale").is_string())
+            {
+                ScaleKind scale = ScaleKind::Major;
+
+                if (scaleKindFromName (effectNode.at ("scale").get<std::string>(), scale))
+                    effect.scale = scale;
+            }
+
+            if (effectNode.contains ("chord") && effectNode.at ("chord").is_string())
+            {
+                ChordKind chord = ChordKind::Major;
+
+                if (chordKindFromName (effectNode.at ("chord").get<std::string>(), chord))
+                    effect.chord = chord;
+            }
+
+            track.midiEffects.push_back (effect);
         }
     }
 
@@ -611,6 +655,29 @@ json effectSlotToJson (const EffectSlot& effect)
     };
 }
 
+json midiEffectsToJson (const std::vector<MidiEffect>& effects)
+{
+    json values = json::array();
+
+    for (const auto& effect : effects)
+    {
+        values.push_back (json {
+            { "chord", chordKindName (effect.chord) },
+            { "division", effect.division },
+            { "enabled", effect.enabled },
+            { "kind", midiEffectKindName (effect.kind) },
+            { "octaves", effect.octaves },
+            { "root", effect.root },
+            { "scale", scaleKindName (effect.scale) },
+            { "semitones", effect.semitones },
+            { "velocityAdd", effect.velocityAdd },
+            { "velocityScale", effect.velocityScale }
+        });
+    }
+
+    return values;
+}
+
 json pluginsToJson (const std::vector<PluginInsert>& plugins)
 {
     json values = json::array();
@@ -678,6 +745,7 @@ json trackToJson (const Track& track)
         { "plugin", track.plugins.empty() ? track.pluginIdentifier : track.plugins.front().identifier },
         { "pluginName", track.plugins.empty() ? track.pluginName : track.plugins.front().name },
         { "pluginState", track.plugins.empty() ? track.pluginState : track.plugins.front().state },
+        { "midiEffects", midiEffectsToJson (track.midiEffects) },
         { "plugins", pluginsToJson (track.plugins) },
         { "session", std::move (session) },
         { "type", track.type == TrackType::Audio ? "audio" : "midi" }

@@ -10,7 +10,7 @@
 namespace waveform
 {
 
-/// Up to four VST3 inserts per track. The audio thread only reads published bindings.
+/// Up to four inserts per track. macOS also scans Audio Units. The audio thread only reads published bindings.
 class PluginHost
 {
 public:
@@ -27,7 +27,7 @@ public:
     juce::AudioPluginFormatManager& formats() noexcept { return formats_; }
     juce::KnownPluginList& known() noexcept { return known_; }
 
-    /// Scans the platform's default VST3 folders. Message thread only.
+    /// Scans the default VST3 folders, and Audio Unit folders on macOS. Message thread only.
     int scan();
 
     /// Replaces one insert slot. Empty error string means success. Message thread only.

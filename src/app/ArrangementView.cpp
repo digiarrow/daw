@@ -1,6 +1,7 @@
 #include "ArrangementView.hpp"
 
 #include "StudioLookAndFeel.hpp"
+#include "waveform/clips.hpp"
 #include "waveform/timing.hpp"
 
 #include <algorithm>
@@ -34,6 +35,12 @@ void ArrangementView::setState (const waveform::Project* project,
     armedTrackId_ = armedTrackId;
     automationTrackId_ = automationTrackId;
     showAutomation_ = showAutomation;
+    repaint();
+}
+
+void ArrangementView::setClipPeaks (std::unordered_map<std::string, std::vector<float>> peaks)
+{
+    peaks_ = std::move (peaks);
     repaint();
 }
 
@@ -143,6 +150,21 @@ ArrangementView::Hit ArrangementView::findHit (juce::Point<int> position) const
         if (quarter >= start && quarter <= end)
         {
             hit.clipIndex = index;
+            const float clipX = xForQuarter (start);
+            const float width = std::max (8.0f, static_cast<float> ((end - start) * kPixelsPerQuarter));
+            const float local = static_cast<float> (position.x) - clipX;
+            const int rowTop = kRuler + row * kRow;
+            const bool top = position.y - rowTop < 14;
+
+            if (local < 10.0f && top)
+                hit.fadeIn = true;
+            else if (width - local < 10.0f && top)
+                hit.fadeOut = true;
+            else if (local < 8.0f)
+                hit.trimStart = true;
+            else if (width - local < 8.0f)
+                hit.trimEnd = true;
+
             break;
         }
     }
@@ -236,13 +258,64 @@ void ArrangementView::paint (juce::Graphics& graphics)
         for (const auto& clip : track.clips)
         {
             const bool audio = std::holds_alternative<waveform::AudioClip> (clip);
-            const double start = audio ? std::get<waveform::AudioClip> (clip).startQuarterNotes
-                                       : std::get<waveform::MidiClip> (clip).startQuarterNotes;
+            const double modelStart = audio ? std::get<waveform::AudioClip> (clip).startQuarterNotes
+                                            : std::get<waveform::MidiClip> (clip).startQuarterNotes;
             const auto& id = waveform::clipId (clip);
-            const float x = xForQuarter (draggingClip_ && id == dragClipId_ ? previewStart_ : start);
-            const float width = std::max (8.0f, static_cast<float> (clipLengthQuarters (clip) * kPixelsPerQuarter));
+            const bool preview = draggingClip_ && id == dragClipId_;
+            const double start = preview ? previewStart_ : modelStart;
+            const double length = preview && dragKind_ != DragKind::Move ? previewLength_ : clipLengthQuarters (clip);
+            const float x = xForQuarter (start);
+            const float width = std::max (8.0f, static_cast<float> (length * kPixelsPerQuarter));
             graphics.setColour (juce::Colour (audio ? 0xff3d6b56 : 0xff8a6238));
             graphics.fillRoundedRectangle (x, static_cast<float> (y + 4), width, static_cast<float> (kRow - 10), 4.0f);
+
+            if (audio)
+            {
+                const auto peaks = peaks_.find (id);
+
+                if (peaks != peaks_.end() && ! peaks->second.empty())
+                {
+                    graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kMint).withAlpha (0.85f));
+                    const float bodyTop = static_cast<float> (y + 8);
+                    const float bodyHeight = static_cast<float> (kRow - 18);
+
+                    for (std::size_t column = 0; column < peaks->second.size(); ++column)
+                    {
+                        const float barX = x + width * static_cast<float> (column) / static_cast<float> (peaks->second.size());
+                        const float barHeight = bodyHeight * std::clamp (peaks->second[column], 0.0f, 1.0f);
+                        graphics.fillRect (barX, bodyTop + bodyHeight - barHeight, std::max (1.0f, width / static_cast<float> (peaks->second.size()) - 1.0f), barHeight);
+                    }
+                }
+
+                const auto& audioClip = std::get<waveform::AudioClip> (clip);
+                const double fadeIn = preview ? previewFadeIn_ : audioClip.fadeInSeconds;
+                const double fadeOut = preview ? previewFadeOut_ : audioClip.fadeOutSeconds;
+                const double tempo = project_->tempoBpm > 0.0 ? project_->tempoBpm : 120.0;
+                const double shownSeconds = std::max (0.01, length * 60.0 / tempo);
+                graphics.setColour (juce::Colour (0xffd7efe4).withAlpha (0.55f));
+
+                if (fadeIn > 0.0)
+                {
+                    const float fadeWidth = width * static_cast<float> (std::min (fadeIn, shownSeconds) / shownSeconds);
+                    juce::Path fade;
+                    fade.startNewSubPath (x, static_cast<float> (y + kRow - 6));
+                    fade.lineTo (x, static_cast<float> (y + 6));
+                    fade.lineTo (x + fadeWidth, static_cast<float> (y + 6));
+                    fade.closeSubPath();
+                    graphics.fillPath (fade);
+                }
+
+                if (fadeOut > 0.0)
+                {
+                    const float fadeWidth = width * static_cast<float> (std::min (fadeOut, shownSeconds) / shownSeconds);
+                    juce::Path fade;
+                    fade.startNewSubPath (x + width, static_cast<float> (y + kRow - 6));
+                    fade.lineTo (x + width, static_cast<float> (y + 6));
+                    fade.lineTo (x + width - fadeWidth, static_cast<float> (y + 6));
+                    fade.closeSubPath();
+                    graphics.fillPath (fade);
+                }
+            }
 
             if (id == selectedClipId_)
             {
@@ -441,6 +514,28 @@ void ArrangementView::mouseDown (const juce::MouseEvent& event)
                              : std::get<waveform::MidiClip> (clip).startQuarterNotes;
         dragOriginQuarter_ = quarterAt (event.x);
         previewStart_ = dragClipStart_;
+        originalLength_ = clipLengthQuarters (clip);
+        previewLength_ = originalLength_;
+        previewFadeIn_ = 0.0;
+        previewFadeOut_ = 0.0;
+
+        if (const auto* audioClip = std::get_if<waveform::AudioClip> (&clip))
+        {
+            previewFadeIn_ = audioClip->fadeInSeconds;
+            previewFadeOut_ = audioClip->fadeOutSeconds;
+        }
+
+        if (hit.fadeIn)
+            dragKind_ = DragKind::FadeIn;
+        else if (hit.fadeOut)
+            dragKind_ = DragKind::FadeOut;
+        else if (hit.trimStart)
+            dragKind_ = DragKind::TrimStart;
+        else if (hit.trimEnd)
+            dragKind_ = DragKind::TrimEnd;
+        else
+            dragKind_ = DragKind::Move;
+
         draggingClip_ = true;
 
         if (onSelectClip)
@@ -476,7 +571,36 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& event)
     if (! draggingClip_)
         return;
 
-    previewStart_ = snapped (dragClipStart_ + quarterAt (event.x) - dragOriginQuarter_);
+    const double quarter = snapped (quarterAt (event.x));
+    const double tempo = project_ != nullptr && project_->tempoBpm > 0.0 ? project_->tempoBpm : 120.0;
+    const double originalEnd = dragClipStart_ + originalLength_;
+
+    if (dragKind_ == DragKind::TrimEnd)
+    {
+        previewStart_ = dragClipStart_;
+        previewLength_ = std::max (0.25, quarter - dragClipStart_);
+    }
+    else if (dragKind_ == DragKind::TrimStart)
+    {
+        previewStart_ = std::clamp (quarter, 0.0, originalEnd - 0.25);
+        previewLength_ = originalEnd - previewStart_;
+    }
+    else if (dragKind_ == DragKind::FadeIn || dragKind_ == DragKind::FadeOut)
+    {
+        const double clipSeconds = std::max (0.05, previewLength_ * 60.0 / tempo);
+        const double localSeconds = std::abs (quarter - dragClipStart_) * 60.0 / tempo;
+        const double fade = std::clamp (localSeconds, 0.0, clipSeconds * 0.5);
+
+        if (dragKind_ == DragKind::FadeIn)
+            previewFadeIn_ = fade;
+        else
+            previewFadeOut_ = fade;
+    }
+    else
+    {
+        previewStart_ = snapped (dragClipStart_ + quarterAt (event.x) - dragOriginQuarter_);
+    }
+
     repaint();
 }
 
@@ -493,13 +617,18 @@ void ArrangementView::mouseUp (const juce::MouseEvent&)
         return;
     }
 
-    if (draggingClip_ && std::abs (previewStart_ - dragClipStart_) > 0.001 && onMoveClip)
+    if (draggingClip_ && dragKind_ == DragKind::Move && std::abs (previewStart_ - dragClipStart_) > 0.001 && onMoveClip)
         onMoveClip (dragTrackId_, dragClipId_, previewStart_);
+    else if (draggingClip_ && (dragKind_ == DragKind::TrimStart || dragKind_ == DragKind::TrimEnd) && onResizeClip)
+        onResizeClip (dragTrackId_, dragClipId_, previewStart_, previewLength_);
+    else if (draggingClip_ && (dragKind_ == DragKind::FadeIn || dragKind_ == DragKind::FadeOut) && onFadeClip)
+        onFadeClip (dragTrackId_, dragClipId_, previewFadeIn_, previewFadeOut_);
 
     if (draggingLoop_ && onLoopEdit)
         onLoopEdit (true, previewLoopStart_, previewLoopEnd_);
 
     draggingClip_ = false;
+    dragKind_ = DragKind::None;
     draggingLoop_ = false;
 }
 

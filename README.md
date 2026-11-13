@@ -15,16 +15,16 @@ What this slice does:
 - A metronome locked to the clock, with a count-in before recording, and a test tone that sounds even when the transport is stopped.
 - MIDI input, MIDI recording, and playback through a built-in polyphonic synth (oscillator, ADSR, low-pass filter).
 - A piano roll: draw, move, resize, delete, velocity, grid snap, and quantize. Those edits undo.
-- An arrangement timeline: clips on a bar grid, drag to move, a playhead, and a loop brace.
+- An arrangement timeline: clips on a bar grid, drag to move, edge-drag to trim, top-corner fades that crossfade when they overlap, waveform peaks inside audio clips, a playhead, and a loop brace. Delete removes the selected clip. X splits it at the playhead.
 - Audio recording from the device input onto an audio track.
 - Track inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator), group buses, and two sends. **Add Delay** and **Make Group** are on the track toolbar.
 - **Session** switches the timeline for a clip grid. Double-click a slot to create a clip, click to launch it on the beat, the bar, or immediately. A scene number launches the whole row.
 - The browser lists audio files. Drag one onto an arrangement lane or a track row. **Folder** picks a different directory.
-- **Plug-in** scans VST3 folders, loads one insert on the selected track, and opens its editor. Other tracks are delayed to match the plug-in's latency.
-- The instrument menu sets a MIDI track to the synth, sampler, FM, or drum voice. Drop an audio file on a MIDI track to make it a sampler.
+- **Plug-in** scans VST3 folders, and Audio Unit folders on macOS, then lists instruments and effects from both. Each track hosts up to four inserts and can open an editor. Other tracks are delayed to match the plug-in's latency.
+- The instrument menu sets a MIDI track to the synth, sampler, FM, or drum voice. Drop an audio file on a MIDI track to make it a sampler. Up to four MIDI effects (arpeggiator, chord, scale, pitch, velocity) sit in front of that instrument. **Import MIDI** and **Export MIDI** read and write a standard `.mid` file for the selected clip.
 - Ctrl-click an audio clip to drop a warp marker. Playback time-stretches between markers with Signalsmith Stretch (MIT) and keeps the pitch. Shift-drop another file onto the clip to add a take, then Alt-click to comp that take in.
 
-There is still no time-stretch and no plug-in hosting. The synth is the built-in instrument, not a hosted plug-in.
+The built-in synth is still the default instrument. Hosted plug-ins are inserts on the track, not a replacement for that instrument.
 
 The engine and the thread model are described in [ARCHITECTURE.md](ARCHITECTURE.md). The project file is specified in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md).
 

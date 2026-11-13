@@ -2,8 +2,11 @@
 
 #include "ClipLibrary.hpp"
 #include "OfflineRenderer.hpp"
+#include "waveform/clips.hpp"
 #include "waveform/collect.hpp"
 #include "waveform/later.hpp"
+#include "waveform/midi_file.hpp"
+#include "waveform/plugins.hpp"
 #include "StudioLookAndFeel.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/serialize.hpp"
@@ -420,7 +423,7 @@ MainComponent::MainComponent()
     deviceLabel_.setJustificationType (juce::Justification::centredRight);
     deviceLabel_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kDim));
     statusLabel_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kMint));
-    hintLabel_.setText ("Space plays. Cmd/Ctrl+S saves, O opens, E exports. R records. Ctrl-click warps, Alt-click comps.", juce::dontSendNotification);
+    hintLabel_.setText ("Space plays. Delete removes a clip, X splits it. Drag clip edges to trim, top corners to fade. Cmd/Ctrl+S saves.", juce::dontSendNotification);
     hintLabel_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kDim));
     hintLabel_.setFont (juce::Font (juce::FontOptions (12.5f)));
     bpmCaption_.setText ("BPM", juce::dontSendNotification);
@@ -488,6 +491,11 @@ MainComponent::MainComponent()
     arrangement_.onSelectClip = [this] (const std::string& trackId, const std::string& clipId) { selectClip (trackId, clipId); };
     arrangement_.onArmTrack = [this] (const std::string& trackId) { armTrack (trackId); };
     arrangement_.onMoveClip = [this] (const std::string& trackId, const std::string& clipId, double start) { moveClip (trackId, clipId, start); };
+    arrangement_.onResizeClip = [this] (const std::string& trackId, const std::string& clipId, double start, double length) { resizeClip (trackId, clipId, start, length); };
+    arrangement_.onFadeClip = [this] (const std::string& trackId, const std::string& clipId, double fadeIn, double fadeOut) { fadeClip (trackId, clipId, fadeIn, fadeOut); };
+    midiEffectBar_.onChange = [this] (std::vector<waveform::MidiEffect> effects) { setMidiEffects (std::move (effects)); };
+    midiEffectBar_.importButton().onClick = [this] { importMidi(); };
+    midiEffectBar_.exportButton().onClick = [this] { exportMidi(); };
     arrangement_.onCreateMidiClip = [this] (const std::string& trackId, double start) { createMidiClip (trackId, start); };
     arrangement_.onSeek = [this] (double quarter) { engine_.seekQuarterNotes (quarter); };
     arrangement_.onMarkers = [this] (const std::string& trackId, const std::string& clipId, std::vector<waveform::WarpMarker> warp, std::vector<waveform::CompSegment> comp)
@@ -852,7 +860,7 @@ MainComponent::MainComponent()
              &loadDemoButton_, &openButton_, &recentButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &addReturnButton_, &mixerButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_, &lfoButton_, &audioToMidiButton_,
-             &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &mixer_, &trackViewport_ })
+             &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &mixer_, &midiEffectBar_, &trackViewport_ })
     {
         addAndMakeVisible (component);
         silenceFocus (*component);
@@ -1016,6 +1024,8 @@ void MainComponent::resized()
     recentButton_.setBounds (trackHeader.removeFromRight (72));
 
     area.removeFromTop (6);
+    midiEffectBar_.setBounds (area.removeFromTop (28));
+    area.removeFromTop (4);
     statusLabel_.setBounds (area.removeFromTop (20));
     area.removeFromTop (6);
     masterBounds_ = area.removeFromBottom (52);
@@ -1138,6 +1148,26 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
                 return false;
 
         record();
+        return true;
+    }
+
+    if (key == juce::KeyPress::deleteKey || key == juce::KeyPress::backspaceKey)
+    {
+        if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+            if (focused->findParentComponentOfClass<juce::TextEditor>() != nullptr)
+                return false;
+
+        deleteSelectedClip();
+        return true;
+    }
+
+    if (key == juce::KeyPress ('x', 0, 0))
+    {
+        if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+            if (focused->findParentComponentOfClass<juce::TextEditor>() != nullptr)
+                return false;
+
+        splitSelectedClip();
         return true;
     }
 
@@ -1459,6 +1489,7 @@ void MainComponent::undo()
 
     applyModelToControls();
     rebuildTracks();
+    rebuildSelection();
     syncEngine();
     syncPlugins();
     setStatus (juce::String ("Undid ") + history_.redoName());
@@ -1471,6 +1502,7 @@ void MainComponent::redo()
 
     applyModelToControls();
     rebuildTracks();
+    rebuildSelection();
     syncEngine();
     syncPlugins();
     setStatus (juce::String ("Redid ") + history_.undoName());
@@ -1760,6 +1792,43 @@ void MainComponent::refreshArrangement()
     const double quarter = waveform::Timing::quarterNotesFromSamples (info.positionSamples, rate, info.tempoBpm);
     arrangement_.setState (&project_, quarter, selectedClipId_, armedTrackId_, selectedTrackId_, showAutomation_);
 
+    std::string signature;
+
+    for (const auto& track : project_.tracks)
+        for (const auto& clip : track.clips)
+            if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
+                signature += audio->id + '\n' + audio->file + '\n';
+
+    if (signature != peakSignature_)
+    {
+        peakSignature_ = signature;
+        clipPeaks_.clear();
+
+        for (const auto& track : project_.tracks)
+        {
+            for (const auto& clip : track.clips)
+            {
+                const auto* audio = std::get_if<waveform::AudioClip> (&clip);
+
+                if (audio == nullptr || audio->file.empty())
+                    continue;
+
+                std::string error;
+                const auto loaded = engine_.library().load (audio->file, rate, error);
+
+                if (loaded == nullptr || loaded->left.empty())
+                    continue;
+
+                clipPeaks_[audio->id] = waveform::waveformPeaks (loaded->left.data(),
+                                                                loaded->right.empty() ? nullptr : loaded->right.data(),
+                                                                loaded->frames(),
+                                                                48);
+            }
+        }
+
+        arrangement_.setClipPeaks (clipPeaks_);
+    }
+
     for (int index = 0; index < 64; ++index)
     {
         sessionActive_[static_cast<std::size_t> (index)] = engine_.sessionScene (index);
@@ -1863,6 +1932,148 @@ void MainComponent::moveClip (const std::string& trackId, const std::string& cli
     syncEngine();
     refreshHistoryButtons();
     rebuildTracks();
+}
+
+void MainComponent::resizeClip (const std::string& trackId, const std::string& clipId, double startQuarterNotes, double lengthQuarterNotes)
+{
+    history_.execute (project_, std::make_unique<waveform::ResizeClipCommand> (trackId, clipId, startQuarterNotes, lengthQuarterNotes, project_.tempoBpm));
+    syncEngine();
+    refreshHistoryButtons();
+    refreshArrangement();
+}
+
+void MainComponent::fadeClip (const std::string& trackId, const std::string& clipId, double fadeInSeconds, double fadeOutSeconds)
+{
+    history_.execute (project_, std::make_unique<waveform::SetClipFadesCommand> (trackId, clipId, fadeInSeconds, fadeOutSeconds));
+    syncEngine();
+    refreshHistoryButtons();
+    refreshArrangement();
+}
+
+void MainComponent::deleteSelectedClip()
+{
+    if (selectedTrackId_.empty() || selectedClipId_.empty())
+        return;
+
+    history_.execute (project_, std::make_unique<waveform::RemoveClipCommand> (selectedTrackId_, selectedClipId_));
+    selectedClipId_.clear();
+    syncEngine();
+    refreshHistoryButtons();
+    rebuildTracks();
+    refreshPiano();
+    setStatus ("Clip deleted.");
+}
+
+void MainComponent::splitSelectedClip()
+{
+    if (selectedTrackId_.empty() || selectedClipId_.empty())
+        return;
+
+    const auto info = engine_.playbackInfo();
+    const double rate = info.sampleRate > 0 ? info.sampleRate : 48000.0;
+    const double quarter = waveform::Timing::quarterNotesFromSamples (info.positionSamples, rate, project_.tempoBpm);
+    history_.execute (project_, std::make_unique<waveform::SplitClipCommand> (selectedTrackId_, selectedClipId_, quarter, project_.tempoBpm));
+    syncEngine();
+    refreshHistoryButtons();
+    refreshArrangement();
+    setStatus ("Split the clip at the playhead.");
+}
+
+void MainComponent::setMidiEffects (std::vector<waveform::MidiEffect> effects)
+{
+    if (selectedTrackId_.empty())
+        return;
+
+    history_.execute (project_, std::make_unique<waveform::SetMidiEffectsCommand> (selectedTrackId_, std::move (effects)));
+    syncEngine();
+    refreshHistoryButtons();
+}
+
+void MainComponent::importMidi()
+{
+    auto* track = selectedTrack();
+
+    if (track == nullptr || track->type != waveform::TrackType::Midi)
+    {
+        setStatus ("Select a MIDI track before importing.");
+        return;
+    }
+
+    fileChooser_ = std::make_unique<juce::FileChooser> ("Import a MIDI file", juce::File(), "*.mid;*.midi");
+    fileChooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                               [this] (const juce::FileChooser& chooser)
+                               {
+                                   const auto file = chooser.getResult();
+
+                                   if (! file.existsAsFile())
+                                       return;
+
+                                   juce::MemoryBlock bytes;
+
+                                   if (! file.loadFileAsData (bytes))
+                                   {
+                                       setStatus ("Could not read the MIDI file.");
+                                       return;
+                                   }
+
+                                   const auto imported = waveform::midiClipFromSmf (static_cast<const std::uint8_t*> (bytes.getData()), bytes.getSize());
+
+                                   if (! imported.ok)
+                                   {
+                                       setStatus (imported.error);
+                                       return;
+                                   }
+
+                                   auto* destination = selectedTrack();
+
+                                   if (destination == nullptr || destination->type != waveform::TrackType::Midi)
+                                       return;
+
+                                   waveform::MidiClip clip = imported.clip;
+                                   clip.name = file.getFileNameWithoutExtension().toStdString();
+                                   auto command = std::make_unique<waveform::AddMidiClipCommand> (destination->id, std::move (clip));
+                                   selectedClipId_ = command->clipId();
+                                   history_.execute (project_, std::move (command));
+                                   syncEngine();
+                                   rebuildTracks();
+                                   refreshHistoryButtons();
+                                   refreshPiano();
+                                   setStatus ("Imported " + file.getFileName() + ".");
+                               });
+}
+
+void MainComponent::exportMidi()
+{
+    const auto* track = selectedTrack();
+    const waveform::MidiClip* midi = nullptr;
+
+    if (track != nullptr)
+        for (const auto& clip : track->clips)
+            if (const auto* candidate = std::get_if<waveform::MidiClip> (&clip); candidate != nullptr && candidate->id == selectedClipId_)
+                midi = candidate;
+
+    if (midi == nullptr)
+    {
+        setStatus ("Select a MIDI clip to export.");
+        return;
+    }
+
+    const auto bytes = waveform::midiClipToSmf (*midi);
+    const auto suggested = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (midi->name + ".mid");
+    fileChooser_ = std::make_unique<juce::FileChooser> ("Export MIDI", suggested, "*.mid");
+    fileChooser_->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+                               [this, bytes] (const juce::FileChooser& chooser)
+                               {
+                                   const auto file = chooser.getResult();
+
+                                   if (file == juce::File())
+                                       return;
+
+                                   if (! file.replaceWithData (bytes.data(), bytes.size()))
+                                       setStatus ("Could not write the MIDI file.");
+                                   else
+                                       setStatus ("Exported " + file.getFileName() + ".");
+                               });
 }
 
 void MainComponent::createMidiClip (const std::string& trackId, double startQuarterNotes)
@@ -2163,7 +2374,18 @@ void MainComponent::openPluginEditor (int slot)
 void MainComponent::showPluginMenu()
 {
     juce::PopupMenu menu;
-    menu.addItem (1, "Scan VST3");
+    juce::String scanLabel = "Scan ";
+    const auto formats = waveform::hostedPluginFormats();
+
+    for (std::size_t index = 0; index < formats.size(); ++index)
+    {
+        if (index > 0)
+            scanLabel += " and ";
+
+        scanLabel += waveform::hostedPluginFormatName (formats[index]);
+    }
+
+    menu.addItem (1, scanLabel);
     juce::PopupMenu openMenu;
     juce::PopupMenu removeMenu;
     juce::PopupMenu moveMenu;
@@ -2189,21 +2411,22 @@ void MainComponent::showPluginMenu()
 
     for (int index = 0; index < static_cast<int> (scannedPlugins_.size()); ++index)
         menu.addItem (100 + index, scannedPlugins_[static_cast<std::size_t> (index)].name
-                                      + "  (" + scannedPlugins_[static_cast<std::size_t> (index)].manufacturerName + ")");
+                                      + "  (" + scannedPlugins_[static_cast<std::size_t> (index)].pluginFormatName
+                                      + ", " + scannedPlugins_[static_cast<std::size_t> (index)].manufacturerName + ")");
 
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&pluginButton_),
-                        [this] (int result)
+                        [this, scanLabel] (int result)
                         {
                             if (result == 1)
                             {
-                                setStatus ("Scanning VST3...");
+                                setStatus ("Scanning " + scanLabel.substring (5) + "...");
                                 const int found = engine_.plugins().scan();
                                 scannedPlugins_.clear();
 
                                 for (const auto& type : engine_.plugins().known().getTypes())
                                     scannedPlugins_.push_back (type);
 
-                                setStatus ("Found " + juce::String (found) + " VST3 plug-in(s).");
+                                setStatus ("Found " + juce::String (found) + " plug-in(s).");
                                 syncPlugins();
                                 return;
                             }
@@ -2632,5 +2855,6 @@ void MainComponent::rebuildSelection()
         rows_[index]->setSelected (project_.tracks[index].id == selectedTrackId_);
 
     deviceStrip_.setTrack (selectedTrack());
+    midiEffectBar_.setEffects (selectedTrack() != nullptr ? selectedTrack()->midiEffects : std::vector<waveform::MidiEffect> {});
     applyModelToControls();
 }

@@ -564,4 +564,74 @@ private:
     bool applied_ = false;
 };
 
+class SplitClipCommand : public EditCommand
+{
+public:
+    SplitClipCommand (std::string trackId, std::string clipId, double splitQuarter, double bpm);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+    [[nodiscard]] const std::string& rightClipId() const noexcept { return rightId_; }
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    std::string rightId_;
+    double splitQuarter_ = 0.0;
+    double bpm_ = 120.0;
+    Clip original_ { AudioClip {} };
+    bool applied_ = false;
+};
+
+class ResizeClipCommand : public EditCommand
+{
+public:
+    ResizeClipCommand (std::string trackId, std::string clipId, double newStartQuarter, double newLengthQuarters, double bpm);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    double newStart_ = 0.0;
+    double newLength_ = 1.0;
+    double bpm_ = 120.0;
+    Clip original_ { AudioClip {} };
+    bool applied_ = false;
+};
+
+class SetClipFadesCommand : public EditCommand
+{
+public:
+    SetClipFadesCommand (std::string trackId, std::string clipId, double fadeInSeconds, double fadeOutSeconds);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    double fadeIn_ = 0.0;
+    double fadeOut_ = 0.0;
+    double previousIn_ = 0.0;
+    double previousOut_ = 0.0;
+    bool applied_ = false;
+};
+
+class SetMidiEffectsCommand : public EditCommand
+{
+public:
+    SetMidiEffectsCommand (std::string trackId, std::vector<MidiEffect> effects);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::vector<MidiEffect> next_;
+    std::vector<MidiEffect> previous_;
+    bool applied_ = false;
+};
+
 } // namespace waveform
