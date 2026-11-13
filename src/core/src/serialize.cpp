@@ -298,6 +298,15 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
         }
     }
 
+    if (node.contains ("plugin") && node.at ("plugin").is_string())
+        track.pluginIdentifier = node.at ("plugin").get<std::string>();
+
+    if (node.contains ("pluginName") && node.at ("pluginName").is_string())
+        track.pluginName = node.at ("pluginName").get<std::string>();
+
+    if (node.contains ("pluginState") && node.at ("pluginState").is_string())
+        track.pluginState = node.at ("pluginState").get<std::string>();
+
     if (track.type == TrackType::Midi && node.contains ("synth"))
         track.synth = synthFromJson (node.at ("synth"));
 
@@ -446,6 +455,9 @@ json trackToJson (const Track& track)
         { "id", track.id },
         { "mixer", mixerToJson (track.mixer) },
         { "name", track.name },
+        { "plugin", track.pluginIdentifier },
+        { "pluginName", track.pluginName },
+        { "pluginState", track.pluginState },
         { "session", std::move (session) },
         { "type", track.type == TrackType::Audio ? "audio" : "midi" }
     };

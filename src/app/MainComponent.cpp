@@ -30,6 +30,36 @@ void silenceFocus (juce::Component& component)
     component.setMouseClickGrabsKeyboardFocus (false);
 }
 
+class PluginWindow : public juce::DocumentWindow
+{
+public:
+    PluginWindow (juce::AudioProcessor& processor, std::function<void()> onClose)
+        : DocumentWindow (processor.getName(),
+                          juce::Colour (waveform::StudioLookAndFeel::kPanel),
+                          DocumentWindow::closeButton),
+          onClose_ (std::move (onClose))
+    {
+        juce::AudioProcessorEditor* editor = processor.createEditorAndMakeActive();
+
+        if (editor == nullptr)
+            editor = new juce::GenericAudioProcessorEditor (processor);
+
+        setContentOwned (editor, true);
+        setUsingNativeTitleBar (true);
+        setResizable (editor->isResizable(), false);
+        centreWithSize (editor->getWidth(), editor->getHeight());
+    }
+
+    void closeButtonPressed() override
+    {
+        if (onClose_)
+            onClose_();
+    }
+
+private:
+    std::function<void()> onClose_;
+};
+
 class DeviceSettingsWindow : public juce::DocumentWindow
 {
 public:
@@ -474,6 +504,7 @@ MainComponent::MainComponent()
     saveButton_.onClick = [this] { chooseProjectSave(); };
     collectButton_.onClick = [this] { collectProject(); };
     exportButton_.onClick = [this] { exportWav(); };
+    pluginButton_.onClick = [this] { showPluginMenu(); };
 
     sampleRateBox_.onChange = [this]
     {
@@ -506,7 +537,7 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &launchBox_, &arrangementButton_, &sessionButton_,
+             &countInBox_, &midiInputBox_, &launchBox_, &arrangementButton_, &sessionButton_, &pluginButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
     {
         addAndMakeVisible (component);
@@ -643,6 +674,8 @@ void MainComponent::resized()
     sessionButton_.setBounds (trackHeader.removeFromLeft (84));
     trackHeader.removeFromLeft (4);
     launchBox_.setBounds (trackHeader.removeFromLeft (110));
+    trackHeader.removeFromLeft (4);
+    pluginButton_.setBounds (trackHeader.removeFromLeft (84));
     exportButton_.setBounds (trackHeader.removeFromRight (96));
     trackHeader.removeFromRight (6);
     collectButton_.setBounds (trackHeader.removeFromRight (80));
@@ -1031,6 +1064,7 @@ void MainComponent::undo()
     applyModelToControls();
     rebuildTracks();
     syncEngine();
+    syncPlugins();
     setStatus (juce::String ("Undid ") + history_.redoName());
 }
 
@@ -1042,6 +1076,7 @@ void MainComponent::redo()
     applyModelToControls();
     rebuildTracks();
     syncEngine();
+    syncPlugins();
     setStatus (juce::String ("Redid ") + history_.undoName());
 }
 
@@ -1135,6 +1170,10 @@ void MainComponent::dropAudioFile (const juce::File& file, const std::string& tr
 
 void MainComponent::saveProject (const juce::File& file)
 {
+    for (int index = 0; index < static_cast<int> (project_.tracks.size()); ++index)
+        if (! project_.tracks[static_cast<std::size_t> (index)].pluginIdentifier.empty())
+            project_.tracks[static_cast<std::size_t> (index)].pluginState = engine_.plugins().stateBase64 (index).toStdString();
+
     auto copy = project_;
     const auto destination = waveform::pathFromUtf8 (file.getFullPathName().toStdString());
 
@@ -1194,6 +1233,7 @@ void MainComponent::loadProject (const juce::File& file)
     rebuildTracks();
     syncEngine();
     browser_.setFolder (file.getParentDirectory());
+    syncPlugins();
     setStatus ("Opened " + file.getFileName());
 }
 
@@ -1493,6 +1533,155 @@ void MainComponent::exportWav()
     request.metronome = metronomeButton_.getToggleState();
     const auto rendered = waveform::renderProjectFile (request);
     setStatus (rendered.ok ? "Exported " + destination.getFileName() : juce::String (rendered.message));
+}
+
+void MainComponent::syncPlugins()
+{
+    pluginWindow_.reset();
+    const double rate = engine_.currentSampleRate() > 0.0 ? engine_.currentSampleRate() : 48000.0;
+    const int block = std::max (64, engine_.playbackInfo().bufferSize);
+    const int count = std::min (static_cast<int> (project_.tracks.size()), waveform::PluginHost::kTracks);
+
+    for (int index = 0; index < waveform::PluginHost::kTracks; ++index)
+    {
+        const auto wanted = index < count ? project_.tracks[static_cast<std::size_t> (index)].pluginIdentifier : std::string {};
+
+        if (wanted == engine_.plugins().identifier (index).toStdString())
+            continue;
+
+        if (wanted.empty())
+        {
+            engine_.plugins().clear (index);
+            continue;
+        }
+
+        const juce::PluginDescription* description = nullptr;
+
+        for (const auto& candidate : scannedPlugins_)
+            if (candidate.createIdentifierString().toStdString() == wanted)
+                description = &candidate;
+
+        if (description == nullptr)
+        {
+            setStatus ("Scan VST3 to restore " + juce::String (project_.tracks[static_cast<std::size_t> (index)].pluginName) + ".");
+            continue;
+        }
+
+        const auto error = engine_.plugins().load (index, *description, rate, block);
+
+        if (error.isNotEmpty())
+            setStatus (error);
+        else
+            engine_.plugins().restoreState (index, project_.tracks[static_cast<std::size_t> (index)].pluginState);
+    }
+}
+
+void MainComponent::openPluginEditor()
+{
+    int index = -1;
+
+    for (std::size_t i = 0; i < project_.tracks.size(); ++i)
+        if (project_.tracks[i].id == selectedTrackId_)
+            index = static_cast<int> (i);
+
+    auto* instance = index >= 0 ? engine_.plugins().instance (index) : nullptr;
+
+    if (instance == nullptr)
+    {
+        setStatus ("Load a plug-in on the selected track first.");
+        return;
+    }
+
+    pluginWindow_ = std::make_unique<PluginWindow> (*instance, [this] { pluginWindow_.reset(); });
+    pluginWindow_->setVisible (true);
+}
+
+void MainComponent::showPluginMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "Scan VST3");
+    menu.addItem (2, "Open editor");
+    menu.addItem (3, "Remove plug-in");
+
+    if (! scannedPlugins_.empty())
+        menu.addSeparator();
+
+    for (int index = 0; index < static_cast<int> (scannedPlugins_.size()); ++index)
+        menu.addItem (100 + index, scannedPlugins_[static_cast<std::size_t> (index)].name
+                                      + "  (" + scannedPlugins_[static_cast<std::size_t> (index)].manufacturerName + ")");
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&pluginButton_),
+                        [this] (int result)
+                        {
+                            if (result == 1)
+                            {
+                                setStatus ("Scanning VST3...");
+                                const int found = engine_.plugins().scan();
+                                scannedPlugins_.clear();
+
+                                for (const auto& type : engine_.plugins().known().getTypes())
+                                    scannedPlugins_.push_back (type);
+
+                                setStatus ("Found " + juce::String (found) + " VST3 plug-in(s).");
+                                syncPlugins();
+                                return;
+                            }
+
+                            if (result == 2)
+                            {
+                                openPluginEditor();
+                                return;
+                            }
+
+                            if (result == 3)
+                            {
+                                if (selectedTrackId_.empty())
+                                    return;
+
+                                pluginWindow_.reset();
+                                auto command = std::make_unique<waveform::SetPluginCommand> (selectedTrackId_, std::string(), std::string(), std::string());
+                                history_.execute (project_, std::move (command));
+                                syncPlugins();
+                                refreshHistoryButtons();
+                                setStatus ("Plug-in removed.");
+                                return;
+                            }
+
+                            const int choice = result - 100;
+
+                            if (choice < 0 || choice >= static_cast<int> (scannedPlugins_.size()) || selectedTrackId_.empty())
+                                return;
+
+                            const auto& description = scannedPlugins_[static_cast<std::size_t> (choice)];
+                            const double rate = engine_.currentSampleRate() > 0.0 ? engine_.currentSampleRate() : 48000.0;
+                            const int block = std::max (64, engine_.playbackInfo().bufferSize);
+                            int index = -1;
+
+                            for (std::size_t i = 0; i < project_.tracks.size(); ++i)
+                                if (project_.tracks[i].id == selectedTrackId_)
+                                    index = static_cast<int> (i);
+
+                            if (index < 0)
+                                return;
+
+                            pluginWindow_.reset();
+                            const auto error = engine_.plugins().load (index, description, rate, block);
+
+                            if (error.isNotEmpty())
+                            {
+                                setStatus (error);
+                                return;
+                            }
+
+                            history_.execute (project_, std::make_unique<waveform::SetPluginCommand> (
+                                                            selectedTrackId_,
+                                                            description.createIdentifierString().toStdString(),
+                                                            description.name.toStdString(),
+                                                            engine_.plugins().stateBase64 (index).toStdString()));
+                            refreshHistoryButtons();
+                            const int latency = engine_.plugins().latency (index);
+                            setStatus ("Loaded " + description.name + ". Latency " + juce::String (latency) + " samples, compensated on the other tracks.");
+                        });
 }
 
 void MainComponent::showDeviceSettings()

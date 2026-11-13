@@ -79,6 +79,9 @@ private:
     void commitTake();
     void collectProject();
     void exportWav();
+    void showPluginMenu();
+    void syncPlugins();
+    void openPluginEditor();
 
     [[nodiscard]] std::filesystem::path projectPath() const;
     [[nodiscard]] waveform::Track* selectedTrack();
@@ -117,6 +120,7 @@ private:
     juce::TextButton saveButton_ { "Save" };
     juce::TextButton arrangementButton_ { "Arrangement" };
     juce::TextButton sessionButton_ { "Session" };
+    juce::TextButton pluginButton_ { "Plug-in" };
 
     juce::ToggleButton loopButton_ { "Loop" };
     juce::ToggleButton metronomeButton_ { "Click" };
@@ -142,6 +146,8 @@ private:
     std::vector<std::unique_ptr<TrackRow>> rows_;
     std::unique_ptr<juce::FileChooser> fileChooser_;
     std::unique_ptr<juce::DocumentWindow> deviceWindow_;
+    std::unique_ptr<juce::DocumentWindow> pluginWindow_;
+    std::vector<juce::PluginDescription> scannedPlugins_;
 
     juce::Rectangle<int> transportBounds_;
     juce::Rectangle<int> masterBounds_;

@@ -343,6 +343,25 @@ private:
     bool applied_ = false;
 };
 
+class SetPluginCommand : public EditCommand
+{
+public:
+    SetPluginCommand (std::string trackId, std::string identifier, std::string pluginName, std::string state);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string identifier_;
+    std::string pluginName_;
+    std::string state_;
+    std::string previousId_;
+    std::string previousName_;
+    std::string previousState_;
+    bool applied_ = false;
+};
+
 class RemoveClipCommand : public EditCommand
 {
 public:

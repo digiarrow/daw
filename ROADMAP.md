@@ -16,12 +16,11 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 - [partial] Automation. A `mixer.gainDb` lane is applied per block. Lanes round-trip in the project file.
 - [done] Session clip grid. **Session** switches with **Arrangement**. Double-click an empty slot to create a clip, click to launch, the scene number launches the row, and **Arrangement** on a column returns that track to the timeline. Launch timing is immediate, next beat, or next bar. A launched clip loops and replaces arrangement clips on that track. Right-click clears a slot. MIDI slots edit in the piano roll.
 - [done] Browser, save-and-collect, WAV export. The browser lists audio files in a folder. Drag a file onto an arrangement lane or a track row to place it. **Folder** changes the directory. **Collect** copies media into `Media/`. **Export WAV** bounces 8 seconds.
-- [partial] Plugin delay compensation. `compensateDelay` is the delay line. A VST3 plugin is not loaded in the audio callback yet.
-- [skipped for this increment] In-window VST3 browser. JUCE can host VST3; wiring a scanner into the callback is the remaining step, and it was not finished here.
+- [done] VST3 hosting and plugin delay compensation. **Plug-in** scans the platform VST3 folders, loads one insert on the selected track, and opens its editor (or a generic editor). Other tracks are delayed by `compensateDelay` so they line up with the plug-in's reported latency. The identifier and state are stored in the project. Offline WAV export does not run hosted plug-ins.
 
 ### Phase 1 status
 
-You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay, and launch session clips on a quantize grid. Known issues: delay time is capped near 170 ms; live MIDI is one buffer late; export is a fixed 8 seconds from the saved file; a VST3 slot is not in the window.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay, launch session clips, drag audio from the browser, and load a VST3 insert. Known issues: the built-in delay time is capped near 170 ms; live MIDI is one buffer late; export is a fixed 8 seconds and does not include hosted plug-ins.
 
 ## Phase 2 — partial
 

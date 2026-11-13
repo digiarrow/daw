@@ -127,6 +127,9 @@ struct Track
     std::vector<EffectSlot> effects;
     std::vector<Clip> clips;
     std::vector<SessionSlot> session;
+    std::string pluginIdentifier;
+    std::string pluginName;
+    std::string pluginState;
 };
 
 struct Project

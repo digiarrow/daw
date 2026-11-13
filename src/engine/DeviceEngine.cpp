@@ -400,6 +400,7 @@ void DeviceEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::Midi
 void DeviceEngine::maintenance()
 {
     reclaimGraphs();
+    plugins_.reclaim();
 }
 
 PlaybackInfo DeviceEngine::playbackInfo() const
@@ -778,6 +779,7 @@ void DeviceEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
         effectArena_.reset (new EffectState[static_cast<std::size_t> (kMaxRouteTracks * kMaxInserts)] {});
 
     bindBlockScratch (blockScratch_, routeStorage_.data(), scratch, effectArena_.get());
+    plugins_.prepare (transport_.sampleRate(), scratch);
 
     sampleRate_.store (static_cast<int> (std::lround (transport_.sampleRate())), std::memory_order_relaxed);
     bufferSize_.store (block, std::memory_order_relaxed);
@@ -803,12 +805,18 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
         if (outputChannelData[channel] != nullptr)
             juce::FloatVectorOperations::clear (outputChannelData[channel], numSamples);
 
+    plugins_.setBusy (true);
     const RenderGraph* graph = acquireGraph();
 
     struct Release
     {
         DeviceEngine& engine;
-        ~Release() { engine.releaseGraph(); }
+        ~Release()
+        {
+            engine.releaseGraph();
+            engine.plugins_.setBusy (false);
+            engine.plugins_.reclaim();
+        }
     } release { *this };
 
     if (numOutputChannels <= 0 || numSamples <= 0 || outputChannelData[0] == nullptr)
@@ -820,6 +828,14 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
 
     drainCommands();
     drainLiveMidi();
+    plugins_.beginBlock();
+    ExternalInsert external;
+    external.process = [] (void* context, int track, float* left, float* right, int frames)
+    {
+        static_cast<PluginHost*> (context)->processTrack (track, left, right, frames);
+    };
+    external.context = &plugins_;
+    ExternalInsert* externalPtr = plugins_.anyLoaded() ? &external : nullptr;
 
     const bool directStereo = numOutputChannels >= 2 && outputChannelData[1] != nullptr;
     const int scratchFrames = static_cast<int> (scratchLeft_.size());
@@ -896,7 +912,8 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                                            left + offset + local, right + offset + local,
                                            metronome_, false, nullptr, &structureOverflow_, &schedule,
                                            frames <= scratchFrames_ ? &blockScratch_ : nullptr,
-                                           session_.data(), static_cast<int> (session_.size()));
+                                           session_.data(), static_cast<int> (session_.size()),
+                                           externalPtr);
                         local += piece;
                     }
 

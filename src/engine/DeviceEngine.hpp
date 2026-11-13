@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PluginHost.hpp"
 #include "RenderGraph.hpp"
 #include "waveform/queue.hpp"
 #include "waveform/session.hpp"
@@ -131,6 +132,9 @@ public:
 
     [[nodiscard]] AudioFileInfo probeFile (const std::string& utf8Path) const;
 
+    PluginHost& plugins() noexcept { return plugins_; }
+    [[nodiscard]] const PluginHost& plugins() const noexcept { return plugins_; }
+
 private:
     void audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
                                            int numInputChannels,
@@ -167,6 +171,7 @@ private:
     using GraphHolder = std::shared_ptr<const RenderGraph>;
 
     juce::AudioDeviceManager deviceManager_;
+    PluginHost plugins_;
     ClipLibrary library_;
     SpscQueue<EngineCommand, 128> commands_;
     std::vector<std::string> warnings_;

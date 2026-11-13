@@ -360,7 +360,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         SynthSchedule* synth,
                         BlockScratch* scratch,
                         SessionVoice* session,
-                        int sessionCount) noexcept
+                        int sessionCount,
+                        ExternalInsert* external) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -461,9 +462,14 @@ void renderLinearBlock (const RenderGraph* graph,
     bool routed = false;
 
     if (scratch != nullptr && graph != nullptr && scratch->capacity >= frames)
+    {
+        if (external != nullptr && external->process != nullptr)
+            routed = true;
+
         for (const auto& track : graph->tracks)
             if (track.group || track.effectCount > 0 || track.outputBus != 0 || track.sendGain[0] > 0.0f || track.sendGain[1] > 0.0f)
                 routed = true;
+    }
 
     if (routed)
     {
@@ -510,6 +516,9 @@ void renderLinearBlock (const RenderGraph* graph,
             if (scratch->effects != nullptr)
                 processInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
                                 scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate);
+
+            if (external != nullptr && external->process != nullptr)
+                external->process (external->context, index, scratch->trackLeft[index], scratch->trackRight[index], frames);
 
             const PanGains pan = constantPowerPan (saved.pan);
             endpoints[index].outputBus = source.outputBus;

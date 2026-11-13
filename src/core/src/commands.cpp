@@ -840,4 +840,43 @@ void SetGroupCommand::revert (Project& project)
 
 const char* SetGroupCommand::name() const { return "Group Track"; }
 
+SetPluginCommand::SetPluginCommand (std::string trackId, std::string identifier, std::string pluginName, std::string state)
+    : trackId_ (std::move (trackId)),
+      identifier_ (std::move (identifier)),
+      pluginName_ (std::move (pluginName)),
+      state_ (std::move (state))
+{
+}
+
+void SetPluginCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previousId_ = track->pluginIdentifier;
+    previousName_ = track->pluginName;
+    previousState_ = track->pluginState;
+    track->pluginIdentifier = identifier_;
+    track->pluginName = pluginName_;
+    track->pluginState = state_;
+}
+
+void SetPluginCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+    {
+        track->pluginIdentifier = previousId_;
+        track->pluginName = previousName_;
+        track->pluginState = previousState_;
+    }
+}
+
+const char* SetPluginCommand::name() const { return "Plug-in"; }
+
 } // namespace waveform

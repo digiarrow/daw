@@ -90,6 +90,11 @@ target_compile_definitions(waveform_juce_options INTERFACE
     JUCE_USE_CURL=0
     JUCE_WASAPI=1
     JUCE_ASIO=$<BOOL:${WAVEFORM_ENABLE_ASIO}>
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_VST=0
+    JUCE_PLUGINHOST_AU=0
+    JUCE_PLUGINHOST_LADSPA=0
+    JUCE_PLUGINHOST_LV2=0
 )
 
 if(WAVEFORM_ENABLE_ASIO AND WAVEFORM_ASIO_SDK_DIR)
@@ -138,6 +143,7 @@ add_library(waveform_engine STATIC
     src/engine/ClipLibrary.cpp
     src/engine/DeviceEngine.cpp
     src/engine/OfflineRenderer.cpp
+    src/engine/PluginHost.cpp
     src/engine/RenderGraph.cpp
 )
 target_include_directories(waveform_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/engine")
@@ -148,6 +154,7 @@ target_link_libraries(waveform_engine
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats
+        juce::juce_audio_processors
         juce::juce_recommended_config_flags
 )
 target_compile_features(waveform_engine PUBLIC cxx_std_20)

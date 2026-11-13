@@ -84,6 +84,14 @@ struct RenderTrack
 };
 
 /// Audio-thread scratch for per-track processing. Pointers address `capacity` frames each.
+/// Optional per-track insert invoked on the audio thread after the built-in effects.
+/// `process` must not allocate. `delaySamples` is applied by the callback itself.
+struct ExternalInsert
+{
+    void (*process) (void* context, int track, float* left, float* right, int frames) = nullptr;
+    void* context = nullptr;
+};
+
 struct BlockScratch
 {
     float* trackLeft[kMaxRouteTracks] {};
@@ -167,6 +175,7 @@ void renderLinearBlock (const RenderGraph* graph,
                         SynthSchedule* synth,
                         BlockScratch* scratch = nullptr,
                         SessionVoice* session = nullptr,
-                        int sessionCount = 0) noexcept;
+                        int sessionCount = 0,
+                        ExternalInsert* external = nullptr) noexcept;
 
 } // namespace waveform
