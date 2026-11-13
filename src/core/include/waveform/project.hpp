@@ -46,6 +46,19 @@ struct SynthPatch
     double releaseSeconds = 0.2;
 };
 
+struct WarpMarker
+{
+    double sourceSeconds = 0.0;
+    double timelineQuarters = 0.0;
+};
+
+struct CompSegment
+{
+    double startQuarter = 0.0;
+    double endQuarter = 0.0;
+    int takeIndex = 0;
+};
+
 /// Unwarped audio. The file plays at its natural speed.
 /// `startQuarterNotes` is where it sits on the timeline.
 /// `offsetSeconds` / `lengthSeconds` select a region of the source file.
@@ -59,6 +72,8 @@ struct AudioClip
     double offsetSeconds = 0.0;
     double lengthSeconds = 0.0;
     double gainDb = 0.0;
+    std::vector<WarpMarker> warp;
+    std::vector<CompSegment> comp;
 };
 
 struct MidiNote

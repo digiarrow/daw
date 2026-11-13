@@ -229,6 +229,24 @@ void ArrangementView::paint (juce::Graphics& graphics)
                 graphics.drawRoundedRectangle (x, static_cast<float> (y + 4), width, static_cast<float> (kRow - 10), 4.0f, 1.5f);
             }
 
+            if (audio)
+            {
+                const auto& audioClip = std::get<waveform::AudioClip> (clip);
+                graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kMint));
+
+                for (const auto& marker : audioClip.warp)
+                    graphics.drawLine (xForQuarter (start + marker.timelineQuarters), static_cast<float> (y + 6),
+                                       xForQuarter (start + marker.timelineQuarters), static_cast<float> (y + kRow - 8), 1.0f);
+
+                for (const auto& segment : audioClip.comp)
+                {
+                    const float left = xForQuarter (start + segment.startQuarter);
+                    const float right = xForQuarter (start + segment.endQuarter);
+                    graphics.setColour (juce::Colour (segment.takeIndex % 2 == 0 ? 0xffd4894c : 0xff7dcea0).withAlpha (0.85f));
+                    graphics.fillRect (left, static_cast<float> (y + kRow - 12), std::max (2.0f, right - left), 4.0f);
+                }
+            }
+
             graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kText));
             const auto name = audio ? std::get<waveform::AudioClip> (clip).name : std::get<waveform::MidiClip> (clip).name;
             graphics.drawText (name, static_cast<int> (x) + 4, y + 4, static_cast<int> (width) - 8, kRow - 10, juce::Justification::centredLeft);
@@ -378,6 +396,23 @@ void ArrangementView::mouseDown (const juce::MouseEvent& event)
     {
         const auto& track = project_->tracks[static_cast<std::size_t> (hit.trackIndex)];
         const auto& clip = track.clips[static_cast<std::size_t> (hit.clipIndex)];
+
+        if ((event.mods.isCommandDown() || event.mods.isAltDown()) && std::holds_alternative<waveform::AudioClip> (clip) && onMarkers)
+        {
+            const auto& audio = std::get<waveform::AudioClip> (clip);
+            auto warp = audio.warp;
+            auto comp = audio.comp;
+            const double local = std::max (0.0, snapped (quarterAt (event.x)) - audio.startQuarterNotes);
+
+            if (event.mods.isAltDown())
+                comp.push_back (waveform::CompSegment { local, local + 1.0, static_cast<int> (comp.size() % 3) });
+            else
+                warp.push_back (waveform::WarpMarker { local * 0.5, local });
+
+            onMarkers (track.id, audio.id, std::move (warp), std::move (comp));
+            return;
+        }
+
         dragTrackId_ = track.id;
         dragClipId_ = waveform::clipId (clip);
         dragClipStart_ = std::holds_alternative<waveform::AudioClip> (clip)

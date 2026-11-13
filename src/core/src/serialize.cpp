@@ -92,6 +92,9 @@ MixerState mixerFromJson (const json& node)
     return mixer;
 }
 
+json warpToJson (const std::vector<WarpMarker>& markers);
+json compToJson (const std::vector<CompSegment>& segments);
+
 json audioClipToJson (const AudioClip& clip)
 {
     return json {
@@ -101,9 +104,31 @@ json audioClipToJson (const AudioClip& clip)
         { "lengthSeconds", clip.lengthSeconds },
         { "name", clip.name },
         { "offsetSeconds", clip.offsetSeconds },
+        { "comp", compToJson (clip.comp) },
         { "startQuarterNotes", clip.startQuarterNotes },
-        { "type", "audio" }
+        { "type", "audio" },
+        { "warp", warpToJson (clip.warp) }
     };
+}
+
+json warpToJson (const std::vector<WarpMarker>& markers)
+{
+    json values = json::array();
+
+    for (const auto& marker : markers)
+        values.push_back (json { { "source", marker.sourceSeconds }, { "quarter", marker.timelineQuarters } });
+
+    return values;
+}
+
+json compToJson (const std::vector<CompSegment>& segments)
+{
+    json values = json::array();
+
+    for (const auto& segment : segments)
+        values.push_back (json { { "end", segment.endQuarter }, { "start", segment.startQuarter }, { "take", segment.takeIndex } });
+
+    return values;
 }
 
 json midiClipToJson (const MidiClip& clip)
@@ -176,6 +201,15 @@ AudioClip audioClipFromJson (const json& node, std::unordered_set<std::string>& 
     gain.gainDb = clip.gainDb;
     clampMixer (gain);
     clip.gainDb = gain.gainDb;
+
+    if (node.contains ("warp") && node.at ("warp").is_array())
+        for (const auto& marker : node.at ("warp"))
+            clip.warp.push_back (WarpMarker { requireNumber (marker, "source"), requireNumber (marker, "quarter") });
+
+    if (node.contains ("comp") && node.at ("comp").is_array())
+        for (const auto& segment : node.at ("comp"))
+            clip.comp.push_back (CompSegment { requireNumber (segment, "start"), requireNumber (segment, "end"), requireInt (segment, "take") });
+
     return clip;
 }
 

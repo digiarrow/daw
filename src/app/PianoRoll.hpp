@@ -1,5 +1,6 @@
 #pragma once
 
+#include "waveform/later.hpp"
 #include "waveform/project.hpp"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -56,4 +57,14 @@ private:
 
     juce::ComboBox snapBox_;
     juce::TextButton quantizeButton_ { "Quantize" };
+    juce::ComboBox keyBox_;
+    juce::ComboBox scaleBox_;
+    juce::TextButton constrainButton_ { "In key" };
+    juce::TextButton humanizeButton_ { "Humanize" };
+    juce::TextButton legatoButton_ { "Legato" };
+    juce::TextButton reverseButton_ { "Reverse" };
+    int keyRoot_ = 0;
+    bool minorKey_ = false;
+
+    void transform (std::vector<waveform::MidiNote> notes);
 };

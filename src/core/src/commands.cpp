@@ -957,6 +957,58 @@ void SetAutomationCommand::revert (Project& project)
 
 const char* SetAutomationCommand::name() const { return "Automation"; }
 
+namespace
+{
+
+AudioClip* findAudioClip (Project& project, const std::string& trackId, const std::string& clipId)
+{
+    auto* track = findTrack (project, trackId);
+
+    if (track == nullptr)
+        return nullptr;
+
+    for (auto& candidate : track->clips)
+        if (auto* audio = std::get_if<AudioClip> (&candidate); audio != nullptr && audio->id == clipId)
+            return audio;
+
+    return nullptr;
+}
+
+} // namespace
+
+SetClipMarkersCommand::SetClipMarkersCommand (std::string trackId, std::string clipId, std::vector<WarpMarker> warp, std::vector<CompSegment> comp)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), warp_ (std::move (warp)), comp_ (std::move (comp))
+{
+}
+
+void SetClipMarkersCommand::apply (Project& project)
+{
+    auto* clip = findAudioClip (project, trackId_, clipId_);
+    applied_ = clip != nullptr;
+
+    if (! applied_)
+        return;
+
+    previousWarp_ = clip->warp;
+    previousComp_ = clip->comp;
+    clip->warp = warp_;
+    clip->comp = comp_;
+}
+
+void SetClipMarkersCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* clip = findAudioClip (project, trackId_, clipId_))
+    {
+        clip->warp = previousWarp_;
+        clip->comp = previousComp_;
+    }
+}
+
+const char* SetClipMarkersCommand::name() const { return "Clip Markers"; }
+
 AddSamplerZoneCommand::AddSamplerZoneCommand (std::string trackId, SamplerZone zone)
     : trackId_ (std::move (trackId)), zone_ (std::move (zone))
 {

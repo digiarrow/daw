@@ -335,6 +335,13 @@ MainComponent::MainComponent()
     arrangement_.onMoveClip = [this] (const std::string& trackId, const std::string& clipId, double start) { moveClip (trackId, clipId, start); };
     arrangement_.onCreateMidiClip = [this] (const std::string& trackId, double start) { createMidiClip (trackId, start); };
     arrangement_.onSeek = [this] (double quarter) { engine_.seekQuarterNotes (quarter); };
+    arrangement_.onMarkers = [this] (const std::string& trackId, const std::string& clipId, std::vector<waveform::WarpMarker> warp, std::vector<waveform::CompSegment> comp)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetClipMarkersCommand> (trackId, clipId, std::move (warp), std::move (comp)));
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus ("Ctrl-click adds a warp marker. Alt-click adds a one-beat comp segment.");
+    };
     arrangement_.onAutomation = [this] (const std::string& trackId, std::vector<waveform::AutomationPoint> points)
     {
         history_.execute (project_, std::make_unique<waveform::SetAutomationCommand> (trackId, "mixer.gainDb", std::move (points)));

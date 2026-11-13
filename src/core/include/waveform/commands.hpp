@@ -343,6 +343,24 @@ private:
     bool applied_ = false;
 };
 
+class SetClipMarkersCommand : public EditCommand
+{
+public:
+    SetClipMarkersCommand (std::string trackId, std::string clipId, std::vector<WarpMarker> warp, std::vector<CompSegment> comp);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    std::vector<WarpMarker> warp_;
+    std::vector<CompSegment> comp_;
+    std::vector<WarpMarker> previousWarp_;
+    std::vector<CompSegment> previousComp_;
+    bool applied_ = false;
+};
+
 class SetAutomationCommand : public EditCommand
 {
 public:

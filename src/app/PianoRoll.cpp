@@ -1,6 +1,7 @@
 #include "PianoRoll.hpp"
 
 #include "StudioLookAndFeel.hpp"
+#include "waveform/later.hpp"
 #include "waveform/midi.hpp"
 
 #include <algorithm>
@@ -21,8 +22,36 @@ constexpr int kHighPitch = 96;
 
 PianoRoll::PianoRoll()
 {
-    addAndMakeVisible (snapBox_);
-    addAndMakeVisible (quantizeButton_);
+    for (auto* box : { &snapBox_, &keyBox_, &scaleBox_ })
+        addAndMakeVisible (box);
+
+    for (auto* button : { &quantizeButton_, &constrainButton_, &humanizeButton_, &legatoButton_, &reverseButton_ })
+        addAndMakeVisible (button);
+
+    const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+    for (int note = 0; note < 12; ++note)
+        keyBox_.addItem (names[note], note + 1);
+
+    keyBox_.setSelectedId (1, juce::dontSendNotification);
+    scaleBox_.addItem ("Major", 1);
+    scaleBox_.addItem ("Minor", 2);
+    scaleBox_.setSelectedId (1, juce::dontSendNotification);
+    keyBox_.onChange = [this] { keyRoot_ = std::max (0, keyBox_.getSelectedId() - 1); repaint(); };
+    scaleBox_.onChange = [this] { minorKey_ = scaleBox_.getSelectedId() == 2; repaint(); };
+    constrainButton_.onClick = [this]
+    {
+        auto notes = clip_.notes;
+        const waveform::MusicalKey key { keyRoot_, minorKey_ };
+
+        for (auto& note : notes)
+            note.note = waveform::constrainToKey (note.note, key);
+
+        transform (std::move (notes));
+    };
+    humanizeButton_.onClick = [this] { transform (waveform::humanizeNotes (clip_.notes, 0.03, 8, 1u)); };
+    legatoButton_.onClick = [this] { transform (waveform::makeLegato (clip_.notes)); };
+    reverseButton_.onClick = [this] { transform (waveform::reverseNotes (clip_.notes, clip_.lengthQuarterNotes)); };
     snapBox_.addItem ("1/4", 4);
     snapBox_.addItem ("1/8", 8);
     snapBox_.addItem ("1/16", 16);
@@ -103,8 +132,22 @@ int PianoRoll::noteAt (juce::Point<int> position, bool& edge) const
 
 void PianoRoll::resized()
 {
-    snapBox_.setBounds (8, 2, 88, 24);
-    quantizeButton_.setBounds (102, 2, 88, 24);
+    snapBox_.setBounds (8, 2, 72, 24);
+    quantizeButton_.setBounds (84, 2, 80, 24);
+    keyBox_.setBounds (170, 2, 56, 24);
+    scaleBox_.setBounds (230, 2, 78, 24);
+    constrainButton_.setBounds (314, 2, 64, 24);
+    humanizeButton_.setBounds (382, 2, 84, 24);
+    legatoButton_.setBounds (470, 2, 68, 24);
+    reverseButton_.setBounds (542, 2, 72, 24);
+}
+
+void PianoRoll::transform (std::vector<waveform::MidiNote> notes)
+{
+    if (! hasClip_ || onCommit == nullptr)
+        return;
+
+    onCommit (std::move (notes));
 }
 
 void PianoRoll::paint (juce::Graphics& graphics)
@@ -130,7 +173,8 @@ void PianoRoll::paint (juce::Graphics& graphics)
             continue;
 
         const bool black = pitch % 12 == 1 || pitch % 12 == 3 || pitch % 12 == 6 || pitch % 12 == 8 || pitch % 12 == 10;
-        graphics.setColour (juce::Colour (black ? 0xff101614 : 0xff24302a));
+        const bool inKey = waveform::pitchInKey (pitch, waveform::MusicalKey { keyRoot_, minorKey_ });
+        graphics.setColour (juce::Colour (inKey ? (black ? 0xff1c2a24 : 0xff31483c) : (black ? 0xff101614 : 0xff24302a)));
         graphics.fillRect (static_cast<float> (kKeyboard), y, static_cast<float> (getWidth() - kKeyboard), static_cast<float> (kKeyHeight));
         graphics.setColour (juce::Colour (black ? 0xff1a1a1a : 0xffd7e2da));
         graphics.fillRect (0.0f, y, static_cast<float> (kKeyboard - 1), static_cast<float> (kKeyHeight - 1));

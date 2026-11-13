@@ -8,24 +8,11 @@
 namespace waveform
 {
 
-struct WarpMarker
-{
-    double sourceSeconds = 0.0;
-    double timelineQuarters = 0.0;
-};
-
 /// Source time for an unwarped or marker-warped clip. Empty markers keep a constant seconds-per-quarter.
 [[nodiscard]] double warpedSourceSeconds (double timelineQuarter,
                                           double clipStartQuarter,
                                           double secondsPerQuarter,
                                           const std::vector<WarpMarker>& markers) noexcept;
-
-struct CompSegment
-{
-    double startQuarter = 0.0;
-    double endQuarter = 0.0;
-    int takeIndex = 0;
-};
 
 /// Which take is audible at this quarter. Returns 0 when no segment matches.
 [[nodiscard]] int compTakeAt (const std::vector<CompSegment>& segments, double quarter) noexcept;
