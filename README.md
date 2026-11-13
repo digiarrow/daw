@@ -1,5 +1,7 @@
 # Waveform Studio
 
+Music
+
 Phase 0 of an original desktop DAW. The working name is Waveform Studio. This is a clean-room project: it does not use another workstation's code, artwork, presets, or samples.
 
 What this slice does:
