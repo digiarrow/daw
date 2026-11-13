@@ -1,0 +1,65 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "macos-ninja",
+      "displayName": "macOS Ninja Release",
+      "generator": "Ninja",
+      "binaryDir": "build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "macos-xcode",
+      "displayName": "macOS Xcode",
+      "generator": "Xcode",
+      "binaryDir": "build-xcode",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" }
+    },
+    {
+      "name": "macos-universal",
+      "displayName": "macOS universal arm64 + x86_64",
+      "generator": "Ninja",
+      "binaryDir": "build-universal",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "WAVEFORM_MACOS_UNIVERSAL": "ON"
+      }
+    },
+    {
+      "name": "windows-vs2026",
+      "displayName": "Windows Visual Studio 2026",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "WAVEFORM_ENABLE_ASIO": "OFF" }
+    },
+    {
+      "name": "windows-vs2022",
+      "displayName": "Windows Visual Studio 2022",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "WAVEFORM_ENABLE_ASIO": "OFF" }
+    },
+    {
+      "name": "linux-ninja",
+      "displayName": "Linux Ninja Release",
+      "generator": "Ninja",
+      "binaryDir": "build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macos-ninja", "configurePreset": "macos-ninja" },
+    { "name": "macos-xcode", "configurePreset": "macos-xcode", "configuration": "Release" },
+    { "name": "macos-universal", "configurePreset": "macos-universal" },
+    { "name": "windows-vs2026", "configurePreset": "windows-vs2026", "configuration": "Release" },
+    { "name": "windows-vs2022", "configurePreset": "windows-vs2022", "configuration": "Release" },
+    { "name": "linux-ninja", "configurePreset": "linux-ninja" }
+  ]
+}
