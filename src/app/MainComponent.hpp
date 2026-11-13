@@ -1,0 +1,126 @@
+#pragma once
+
+#include "DeviceEngine.hpp"
+#include "waveform/commands.hpp"
+#include "waveform/project.hpp"
+
+#include <juce_audio_utils/juce_audio_utils.h>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include <filesystem>
+#include <memory>
+#include <vector>
+
+class MainComponent : public juce::Component,
+                      private juce::Timer,
+                      private juce::Slider::Listener,
+                      private juce::ChangeListener
+{
+public:
+    MainComponent();
+    ~MainComponent() override;
+
+    void paint (juce::Graphics& graphics) override;
+    void resized() override;
+    bool keyPressed (const juce::KeyPress& key) override;
+
+private:
+    class TrackRow;
+
+    void timerCallback() override;
+    void sliderValueChanged (juce::Slider* slider) override;
+    void sliderDragStarted (juce::Slider* slider) override;
+    void sliderDragEnded (juce::Slider* slider) override;
+    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+
+    void syncEngine();
+    void rebuildTracks();
+    void rebuildSelection();
+    void applyModelToControls();
+    void refreshDeviceControls();
+    void refreshTransportReadout();
+    void refreshHistoryButtons();
+    void showWarnings();
+    void setStatus (const juce::String& text);
+
+    void commitTempo (double bpm);
+    void commitMaster (double gainDb);
+    void commitTimeSignature();
+    void commitLoop();
+    void togglePlay();
+    void undo();
+    void redo();
+
+    void chooseAudioFile();
+    void chooseProjectOpen();
+    void chooseProjectSave();
+    void addAudioFile (const juce::File& file);
+    void saveProject (const juce::File& file);
+    void loadProject (const juce::File& file);
+    void loadDemo();
+    void addTrack (waveform::TrackType type);
+    void showDeviceSettings();
+
+    [[nodiscard]] std::filesystem::path projectPath() const;
+    [[nodiscard]] waveform::Track* selectedTrack();
+    [[nodiscard]] std::string ensureAudioTrack();
+
+    waveform::DeviceEngine engine_;
+    waveform::Project project_;
+    waveform::History history_;
+    juce::File projectFile_;
+
+    juce::Label titleLabel_;
+    juce::Label deviceLabel_;
+    juce::Label positionLabel_;
+    juce::Label timeLabel_;
+    juce::Label statusLabel_;
+    juce::Label hintLabel_;
+    juce::Label bpmCaption_;
+    juce::Label masterCaption_;
+
+    juce::TextButton playButton_ { "Play" };
+    juce::TextButton pauseButton_ { "Pause" };
+    juce::TextButton stopButton_ { "Stop" };
+    juce::TextButton deviceButton_ { "Audio Device" };
+    juce::TextButton undoButton_ { "Undo" };
+    juce::TextButton redoButton_ { "Redo" };
+    juce::TextButton addFileButton_ { "Add Audio File" };
+    juce::TextButton addAudioTrackButton_ { "Add Audio Track" };
+    juce::TextButton addMidiTrackButton_ { "Add MIDI Track" };
+    juce::TextButton loadDemoButton_ { "Load Demo" };
+    juce::TextButton openButton_ { "Open" };
+    juce::TextButton saveButton_ { "Save" };
+
+    juce::ToggleButton loopButton_ { "Loop" };
+    juce::ToggleButton metronomeButton_ { "Click" };
+    juce::ToggleButton toneButton_ { "Test Tone" };
+
+    juce::Slider bpmSlider_;
+    juce::Slider masterSlider_;
+    juce::ComboBox numeratorBox_;
+    juce::ComboBox denominatorBox_;
+    juce::ComboBox sampleRateBox_;
+    juce::ComboBox bufferBox_;
+
+    juce::Viewport trackViewport_;
+    juce::Component trackList_;
+    std::vector<std::unique_ptr<TrackRow>> rows_;
+    std::unique_ptr<juce::FileChooser> fileChooser_;
+    std::unique_ptr<juce::DocumentWindow> deviceWindow_;
+
+    juce::Rectangle<int> transportBounds_;
+    juce::Rectangle<int> masterBounds_;
+    juce::Rectangle<float> meterLeftBounds_;
+    juce::Rectangle<float> meterRightBounds_;
+
+    std::string selectedTrackId_;
+    bool updatingControls_ = false;
+    bool draggingTempo_ = false;
+    bool draggingMaster_ = false;
+    double dragTempo_ = 120.0;
+    double dragMasterDb_ = 0.0;
+    float meterLeft_ = 0.0f;
+    float meterRight_ = 0.0f;
+    int seenDeviceGeneration_ = -1;
+};

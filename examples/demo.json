@@ -1,0 +1,86 @@
+{
+  "format": "waveform-studio-project",
+  "loop": {
+    "enabled": true,
+    "endQuarterNotes": 8.0,
+    "startQuarterNotes": 0.0
+  },
+  "master": {
+    "gainDb": 0.0
+  },
+  "name": "Phase 0 Demo",
+  "tempo": 120.0,
+  "timeSignature": {
+    "denominator": 4,
+    "numerator": 4
+  },
+  "tracks": [
+    {
+      "clips": [
+        {
+          "file": "demo-tone.wav",
+          "gainDb": 0.0,
+          "id": "clip-demo-tone",
+          "lengthSeconds": 4.0,
+          "name": "Arpeggio",
+          "offsetSeconds": 0.0,
+          "startQuarterNotes": 0.0,
+          "type": "audio"
+        }
+      ],
+      "id": "track-audio-demo",
+      "mixer": {
+        "gainDb": 0.0,
+        "mute": false,
+        "pan": 0.0,
+        "solo": false
+      },
+      "name": "Bells",
+      "type": "audio"
+    },
+    {
+      "clips": [
+        {
+          "id": "clip-midi-sketch",
+          "lengthQuarterNotes": 4.0,
+          "name": "Sketch",
+          "notes": [
+            {
+              "channel": 1,
+              "lengthQuarterNotes": 1.0,
+              "note": 69,
+              "startQuarterNotes": 0.0,
+              "velocity": 96
+            },
+            {
+              "channel": 1,
+              "lengthQuarterNotes": 1.0,
+              "note": 72,
+              "startQuarterNotes": 1.0,
+              "velocity": 88
+            },
+            {
+              "channel": 1,
+              "lengthQuarterNotes": 1.0,
+              "note": 76,
+              "startQuarterNotes": 2.0,
+              "velocity": 90
+            }
+          ],
+          "startQuarterNotes": 0.0,
+          "type": "midi"
+        }
+      ],
+      "id": "track-midi-demo",
+      "mixer": {
+        "gainDb": 0.0,
+        "mute": false,
+        "pan": 0.0,
+        "solo": false
+      },
+      "name": "Sketch",
+      "type": "midi"
+    }
+  ],
+  "version": 1
+}

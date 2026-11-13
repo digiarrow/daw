@@ -1,0 +1,14 @@
+build/
+build-*/
+out/
+.cache/
+CMakeUserPresets.json
+compile_commands.json
+.DS_Store
+.vs/
+*.user
+*.suo
+CMakeFiles/
+Testing/
+demo-out.wav
+*.wav.tmp
