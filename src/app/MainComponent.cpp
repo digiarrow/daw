@@ -335,6 +335,20 @@ MainComponent::MainComponent()
     arrangement_.onMoveClip = [this] (const std::string& trackId, const std::string& clipId, double start) { moveClip (trackId, clipId, start); };
     arrangement_.onCreateMidiClip = [this] (const std::string& trackId, double start) { createMidiClip (trackId, start); };
     arrangement_.onSeek = [this] (double quarter) { engine_.seekQuarterNotes (quarter); };
+    arrangement_.onAutomation = [this] (const std::string& trackId, std::vector<waveform::AutomationPoint> points)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetAutomationCommand> (trackId, "mixer.gainDb", std::move (points)));
+        syncEngine();
+        refreshHistoryButtons();
+    };
+    automationButton_.onClick = [this]
+    {
+        showAutomation_ = ! showAutomation_;
+        automationButton_.setToggleState (showAutomation_, juce::dontSendNotification);
+        refreshArrangement();
+    };
+    automationButton_.setClickingTogglesState (true);
+    automationButton_.setToggleState (true, juce::dontSendNotification);
     arrangement_.onDropFile = [this] (const std::string& path, const std::string& trackId, double start)
     {
         dropAudioFile (juce::File (path), trackId, start);
@@ -568,7 +582,7 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_,
+             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
     {
         addAndMakeVisible (component);
@@ -709,6 +723,8 @@ void MainComponent::resized()
     pluginButton_.setBounds (trackHeader.removeFromLeft (84));
     trackHeader.removeFromLeft (4);
     instrumentBox_.setBounds (trackHeader.removeFromLeft (100));
+    trackHeader.removeFromLeft (4);
+    automationButton_.setBounds (trackHeader.removeFromLeft (100));
     exportButton_.setBounds (trackHeader.removeFromRight (96));
     trackHeader.removeFromRight (6);
     collectButton_.setBounds (trackHeader.removeFromRight (80));
@@ -1320,7 +1336,7 @@ void MainComponent::refreshArrangement()
     const auto info = engine_.playbackInfo();
     const double rate = info.sampleRate > 0 ? info.sampleRate : 48000.0;
     const double quarter = waveform::Timing::quarterNotesFromSamples (info.positionSamples, rate, info.tempoBpm);
-    arrangement_.setState (&project_, quarter, selectedClipId_, armedTrackId_);
+    arrangement_.setState (&project_, quarter, selectedClipId_, armedTrackId_, selectedTrackId_, showAutomation_);
 
     for (int index = 0; index < 64; ++index)
     {

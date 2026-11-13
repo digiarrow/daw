@@ -14,7 +14,9 @@ public:
     void setState (const waveform::Project* project,
                    double playheadQuarterNotes,
                    const std::string& selectedClipId,
-                   const std::string& armedTrackId);
+                   const std::string& armedTrackId,
+                   const std::string& automationTrackId,
+                   bool showAutomation);
 
     std::function<void (const std::string& trackId, const std::string& clipId)> onSelectClip;
     std::function<void (const std::string& trackId)> onArmTrack;
@@ -22,6 +24,7 @@ public:
     std::function<void (const std::string& trackId, double startQuarterNotes)> onCreateMidiClip;
     std::function<void (double quarterNotes)> onSeek;
     std::function<void (bool enabled, double startQuarterNotes, double endQuarterNotes)> onLoopEdit;
+    std::function<void (const std::string& trackId, std::vector<waveform::AutomationPoint> points)> onAutomation;
     std::function<void (const std::string& path, const std::string& trackId, double startQuarterNotes)> onDropFile;
 
     bool isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& details) override;
@@ -55,6 +58,11 @@ private:
     double scroll_ = 0.0;
     std::string selectedClipId_;
     std::string armedTrackId_;
+    std::string automationTrackId_;
+    bool showAutomation_ = false;
+    bool draggingPoint_ = false;
+    int dragPoint_ = -1;
+    std::vector<waveform::AutomationPoint> automationEdit_;
 
     bool draggingClip_ = false;
     bool draggingLoop_ = false;

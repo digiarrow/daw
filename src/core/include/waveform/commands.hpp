@@ -343,6 +343,23 @@ private:
     bool applied_ = false;
 };
 
+class SetAutomationCommand : public EditCommand
+{
+public:
+    SetAutomationCommand (std::string trackId, std::string parameter, std::vector<AutomationPoint> points);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string parameter_;
+    std::vector<AutomationPoint> next_;
+    std::vector<AutomationPoint> previous_;
+    bool hadLane_ = false;
+    bool applied_ = false;
+};
+
 class SetInstrumentCommand : public EditCommand
 {
 public:

@@ -24,14 +24,46 @@ double snapped (double quarterNotes)
 void ArrangementView::setState (const waveform::Project* project,
                                 double playheadQuarterNotes,
                                 const std::string& selectedClipId,
-                                const std::string& armedTrackId)
+                                const std::string& armedTrackId,
+                                const std::string& automationTrackId,
+                                bool showAutomation)
 {
     project_ = project;
     playhead_ = playheadQuarterNotes;
     selectedClipId_ = selectedClipId;
     armedTrackId_ = armedTrackId;
+    automationTrackId_ = automationTrackId;
+    showAutomation_ = showAutomation;
     repaint();
 }
+
+namespace
+{
+
+juce::Rectangle<int> automationLane (const juce::Component& component, bool shown)
+{
+    if (! shown)
+        return {};
+
+    return { kNames, component.getHeight() - 58, std::max (0, component.getWidth() - kNames - 8), 50 };
+}
+
+double decibelsAt (int y, juce::Rectangle<int> lane)
+{
+    if (lane.getHeight() <= 0)
+        return 0.0;
+
+    const double mix = 1.0 - std::clamp ((static_cast<double> (y) - lane.getY()) / lane.getHeight(), 0.0, 1.0);
+    return -48.0 + mix * 54.0;
+}
+
+int yForDecibels (double decibels, juce::Rectangle<int> lane)
+{
+    const double mix = std::clamp ((decibels + 48.0) / 54.0, 0.0, 1.0);
+    return lane.getBottom() - static_cast<int> (mix * lane.getHeight());
+}
+
+} // namespace
 
 double ArrangementView::quarterAt (int x) const
 {
@@ -203,6 +235,59 @@ void ArrangementView::paint (juce::Graphics& graphics)
         }
     }
 
+    if (showAutomation_ && project_ != nullptr)
+    {
+        const auto lane = automationLane (*this, true);
+        graphics.setColour (juce::Colour (0xff18211d));
+        graphics.fillRoundedRectangle (lane.toFloat(), 4.0f);
+        graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kDim));
+        graphics.drawText ("Volume", 8, lane.getY(), kNames - 12, lane.getHeight(), juce::Justification::centredLeft);
+
+        const waveform::Track* automated = nullptr;
+
+        for (const auto& track : project_->tracks)
+            if (track.id == automationTrackId_)
+                automated = &track;
+
+        const auto* points = &automationEdit_;
+
+        if (! draggingPoint_ && automated != nullptr)
+        {
+            for (const auto& candidate : automated->automation)
+                if (candidate.parameter == "mixer.gainDb")
+                    points = &candidate.points;
+        }
+
+        if (points != nullptr && points->size() >= 2)
+        {
+            juce::Path path;
+
+            for (std::size_t index = 0; index < points->size(); ++index)
+            {
+                const float x = xForQuarter ((*points)[index].quarterNotes);
+                const float y = static_cast<float> (yForDecibels ((*points)[index].value, lane));
+
+                if (index == 0)
+                    path.startNewSubPath (x, y);
+                else
+                    path.lineTo (x, y);
+            }
+
+            graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kCopper));
+            graphics.strokePath (path, juce::PathStrokeType (1.5f));
+        }
+
+        if (points != nullptr)
+        {
+            graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kMint));
+
+            for (const auto& point : *points)
+                graphics.fillEllipse (xForQuarter (point.quarterNotes) - 4.0f,
+                                       static_cast<float> (yForDecibels (point.value, lane)) - 4.0f,
+                                       8.0f, 8.0f);
+        }
+    }
+
     const float playhead = xForQuarter (playhead_);
 
     if (playhead >= kNames)
@@ -214,6 +299,56 @@ void ArrangementView::paint (juce::Graphics& graphics)
 
 void ArrangementView::mouseDown (const juce::MouseEvent& event)
 {
+    const auto lane = automationLane (*this, showAutomation_);
+
+    if (showAutomation_ && lane.contains (event.getPosition()) && project_ != nullptr && ! automationTrackId_.empty())
+    {
+        const waveform::Track* automated = nullptr;
+
+        for (const auto& track : project_->tracks)
+            if (track.id == automationTrackId_)
+                automated = &track;
+
+        automationEdit_.clear();
+
+        if (automated != nullptr)
+            for (const auto& candidate : automated->automation)
+                if (candidate.parameter == "mixer.gainDb")
+                    automationEdit_ = candidate.points;
+
+        const double quarter = std::max (0.0, snapped (quarterAt (event.x)));
+        const double value = decibelsAt (event.y, lane);
+        int nearest = -1;
+        float best = 8.0f;
+
+        for (int index = 0; index < static_cast<int> (automationEdit_.size()); ++index)
+        {
+            const float dx = xForQuarter (automationEdit_[static_cast<std::size_t> (index)].quarterNotes) - static_cast<float> (event.x);
+            const float dy = static_cast<float> (yForDecibels (automationEdit_[static_cast<std::size_t> (index)].value, lane) - event.y);
+            const float distance = std::sqrt (dx * dx + dy * dy);
+
+            if (distance < best)
+            {
+                best = distance;
+                nearest = index;
+            }
+        }
+
+        if (event.mods.isRightButtonDown() && nearest >= 0)
+            automationEdit_.erase (automationEdit_.begin() + nearest);
+        else if (nearest >= 0)
+            dragPoint_ = nearest;
+        else
+        {
+            automationEdit_.push_back ({ quarter, value });
+            dragPoint_ = static_cast<int> (automationEdit_.size()) - 1;
+        }
+
+        draggingPoint_ = true;
+        repaint();
+        return;
+    }
+
     const auto hit = findHit (event.getPosition());
 
     if (hit.ruler && project_ != nullptr && (hit.loopStart || hit.loopEnd))
@@ -259,6 +394,15 @@ void ArrangementView::mouseDown (const juce::MouseEvent& event)
 
 void ArrangementView::mouseDrag (const juce::MouseEvent& event)
 {
+    if (draggingPoint_ && dragPoint_ >= 0 && dragPoint_ < static_cast<int> (automationEdit_.size()))
+    {
+        const auto lane = automationLane (*this, true);
+        automationEdit_[static_cast<std::size_t> (dragPoint_)].quarterNotes = std::max (0.0, snapped (quarterAt (event.x)));
+        automationEdit_[static_cast<std::size_t> (dragPoint_)].value = decibelsAt (event.y, lane);
+        repaint();
+        return;
+    }
+
     if (draggingLoop_ && project_ != nullptr)
     {
         const double quarter = snapped (quarterAt (event.x));
@@ -282,6 +426,17 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& event)
 
 void ArrangementView::mouseUp (const juce::MouseEvent&)
 {
+    if (draggingPoint_)
+    {
+        draggingPoint_ = false;
+        dragPoint_ = -1;
+
+        if (onAutomation)
+            onAutomation (automationTrackId_, automationEdit_);
+
+        return;
+    }
+
     if (draggingClip_ && std::abs (previewStart_ - dragClipStart_) > 0.001 && onMoveClip)
         onMoveClip (dragTrackId_, dragClipId_, previewStart_);
 

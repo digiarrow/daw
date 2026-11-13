@@ -905,6 +905,58 @@ void SetInstrumentCommand::revert (Project& project)
 
 const char* SetInstrumentCommand::name() const { return "Instrument"; }
 
+SetAutomationCommand::SetAutomationCommand (std::string trackId, std::string parameter, std::vector<AutomationPoint> points)
+    : trackId_ (std::move (trackId)), parameter_ (std::move (parameter)), next_ (std::move (points))
+{
+    std::sort (next_.begin(), next_.end(), [] (const AutomationPoint& left, const AutomationPoint& right) {
+        return left.quarterNotes < right.quarterNotes;
+    });
+}
+
+void SetAutomationCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    hadLane_ = false;
+
+    for (const auto& lane : track->automation)
+    {
+        if (lane.parameter == parameter_)
+        {
+            previous_ = lane.points;
+            hadLane_ = true;
+            break;
+        }
+    }
+
+    auto& lanes = track->automation;
+    lanes.erase (std::remove_if (lanes.begin(), lanes.end(), [&] (const AutomationLane& lane) { return lane.parameter == parameter_; }), lanes.end());
+
+    if (! next_.empty())
+        lanes.push_back (AutomationLane { parameter_, next_ });
+}
+
+void SetAutomationCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+    {
+        auto& lanes = track->automation;
+        lanes.erase (std::remove_if (lanes.begin(), lanes.end(), [&] (const AutomationLane& lane) { return lane.parameter == parameter_; }), lanes.end());
+
+        if (hadLane_)
+            lanes.push_back (AutomationLane { parameter_, previous_ });
+    }
+}
+
+const char* SetAutomationCommand::name() const { return "Automation"; }
+
 AddSamplerZoneCommand::AddSamplerZoneCommand (std::string trackId, SamplerZone zone)
     : trackId_ (std::move (trackId)), zone_ (std::move (zone))
 {

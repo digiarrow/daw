@@ -121,6 +121,7 @@ private:
     juce::TextButton arrangementButton_ { "Arrangement" };
     juce::TextButton sessionButton_ { "Session" };
     juce::TextButton pluginButton_ { "Plug-in" };
+    juce::TextButton automationButton_ { "Volume lane" };
 
     juce::ToggleButton loopButton_ { "Loop" };
     juce::ToggleButton metronomeButton_ { "Click" };
@@ -158,6 +159,7 @@ private:
     std::string selectedTrackId_;
     std::string selectedClipId_;
     bool showSession_ = false;
+    bool showAutomation_ = true;
     std::array<int, 64> sessionActive_ {};
     std::array<int, 64> sessionPending_ {};
     std::string armedTrackId_;
