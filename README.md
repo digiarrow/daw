@@ -84,20 +84,20 @@ The deployment target is macOS 12. Running the Intel slice on an Apple silicon M
 
 ## Windows
 
-Install Visual Studio 2022 with the **Desktop development with C++** workload. That includes CMake and the Windows SDK that WASAPI needs.
+Install Visual Studio 2026 (or 2022) with the **Desktop development with C++** workload. That includes CMake and the Windows SDK that WASAPI needs. CMake 4.2 or newer is required for the Visual Studio 2026 generator. Current GitHub `windows-latest` images ship Visual Studio 2026 only.
 
-Use a Developer PowerShell, or any terminal where `cmake` can see the VS 2022 generator.
+Use a Developer PowerShell, or any terminal where `cmake` can see the generator.
 
-### Visual Studio 2022
+### Visual Studio 2026
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWAVEFORM_ENABLE_ASIO=OFF
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DWAVEFORM_ENABLE_ASIO=OFF
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 build\bin\Release\WaveformStudio.exe
 ```
 
-`cmake --preset windows-vs2022` configures the same way. ASIO stays off, so the Audio Device window lists WASAPI devices (DirectSound remains available as a fallback).
+`cmake --preset windows-vs2026` configures the same way. On a machine that still has Visual Studio 2022, use `-G "Visual Studio 17 2022"` or `cmake --preset windows-vs2022`. ASIO stays off, so the Audio Device window lists WASAPI devices (DirectSound remains available as a fallback).
 
 ### Ninja, from a Visual Studio environment
 
@@ -112,13 +112,13 @@ build-ninja\bin\WaveformStudio.exe
 Leave this off unless you have a reason to use an ASIO interface. Turning it on compiles ASIO support and the binary is subject to Steinberg's ASIO SDK licence. JUCE's bundled headers are used unless you point at your own SDK:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWAVEFORM_ENABLE_ASIO=ON
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DWAVEFORM_ENABLE_ASIO=ON
 ```
 
 Or, with a downloaded SDK:
 
 ```bat
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 ^
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 ^
   -DWAVEFORM_ENABLE_ASIO=ON -DWAVEFORM_ASIO_SDK_DIR=C:\path\to\asiosdk
 ```
 

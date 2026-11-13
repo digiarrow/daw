@@ -72,12 +72,12 @@ jobs:
         run: lipo -info "build-universal/bin/WaveformStudio.app/Contents/MacOS/WaveformStudio"
 
   windows:
-    name: Windows (Visual Studio 2022, WASAPI)
+    name: Windows (Visual Studio 2026, WASAPI)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWAVEFORM_ENABLE_ASIO=OFF
+        run: cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -DWAVEFORM_ENABLE_ASIO=OFF
       - name: Build
         run: cmake --build build --config Release --parallel
       - name: Test

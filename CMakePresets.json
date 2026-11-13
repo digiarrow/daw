@@ -28,6 +28,15 @@
       }
     },
     {
+      "name": "windows-vs2026",
+      "displayName": "Windows Visual Studio 2026",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "build",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "cacheVariables": { "WAVEFORM_ENABLE_ASIO": "OFF" }
+    },
+    {
       "name": "windows-vs2022",
       "displayName": "Windows Visual Studio 2022",
       "generator": "Visual Studio 17 2022",
@@ -49,6 +58,7 @@
     { "name": "macos-ninja", "configurePreset": "macos-ninja" },
     { "name": "macos-xcode", "configurePreset": "macos-xcode", "configuration": "Release" },
     { "name": "macos-universal", "configurePreset": "macos-universal" },
+    { "name": "windows-vs2026", "configurePreset": "windows-vs2026", "configuration": "Release" },
     { "name": "windows-vs2022", "configurePreset": "windows-vs2022", "configuration": "Release" },
     { "name": "linux-ninja", "configurePreset": "linux-ninja" }
   ]

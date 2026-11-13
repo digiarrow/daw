@@ -26,8 +26,9 @@ std::string cacheKey (const std::string& path, double sampleRate)
 {
     std::error_code error;
     const auto stamp = std::filesystem::last_write_time (pathFromUtf8 (path), error);
-    const auto ticks = error ? std::filesystem::file_time_type::duration::zero().count()
-                             : stamp.time_since_epoch().count();
+    // libc++'s file_clock duration uses a 128-bit rep, which makes std::to_string ambiguous.
+    const auto ticks = static_cast<long long> (error ? std::filesystem::file_time_type::duration::zero().count()
+                                                     : stamp.time_since_epoch().count());
     return path + "|" + std::to_string (static_cast<int> (std::lround (sampleRate))) + "|" + std::to_string (ticks);
 }
 
