@@ -755,6 +755,96 @@ void AddEffectCommand::revert (Project& project)
 
 const char* AddEffectCommand::name() const { return "Add Effect"; }
 
+RemoveEffectCommand::RemoveEffectCommand (std::string trackId, int index)
+    : trackId_ (std::move (trackId)), index_ (index)
+{
+}
+
+void RemoveEffectCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr && index_ >= 0 && index_ < static_cast<int> (track->effects.size());
+
+    if (! applied_)
+        return;
+
+    removed_ = track->effects[static_cast<std::size_t> (index_)];
+    track->effects.erase (track->effects.begin() + index_);
+}
+
+void RemoveEffectCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+    {
+        const int index = std::clamp (index_, 0, static_cast<int> (track->effects.size()));
+        track->effects.insert (track->effects.begin() + index, removed_);
+    }
+}
+
+const char* RemoveEffectCommand::name() const { return "Remove Effect"; }
+
+MoveEffectCommand::MoveEffectCommand (std::string trackId, int index, int direction)
+    : trackId_ (std::move (trackId)), index_ (index), direction_ (direction < 0 ? -1 : 1)
+{
+}
+
+void MoveEffectCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    const int next = index_ + direction_;
+    applied_ = track != nullptr && index_ >= 0 && next >= 0
+               && index_ < static_cast<int> (track->effects.size())
+               && next < static_cast<int> (track->effects.size());
+
+    if (applied_)
+        std::swap (track->effects[static_cast<std::size_t> (index_)], track->effects[static_cast<std::size_t> (next)]);
+}
+
+void MoveEffectCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+    {
+        const int next = index_ + direction_;
+
+        if (index_ >= 0 && next >= 0 && index_ < static_cast<int> (track->effects.size()) && next < static_cast<int> (track->effects.size()))
+            std::swap (track->effects[static_cast<std::size_t> (index_)], track->effects[static_cast<std::size_t> (next)]);
+    }
+}
+
+const char* MoveEffectCommand::name() const { return "Move Effect"; }
+
+SetEffectCommand::SetEffectCommand (std::string trackId, int index, EffectSlot slot)
+    : trackId_ (std::move (trackId)), index_ (index), next_ (slot)
+{
+}
+
+void SetEffectCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr && index_ >= 0 && index_ < static_cast<int> (track->effects.size());
+
+    if (! applied_)
+        return;
+
+    previous_ = track->effects[static_cast<std::size_t> (index_)];
+    track->effects[static_cast<std::size_t> (index_)] = next_;
+}
+
+void SetEffectCommand::revert (Project& project)
+{
+    if (applied_)
+        if (auto* track = findTrack (project, trackId_); track != nullptr && index_ >= 0 && index_ < static_cast<int> (track->effects.size()))
+            track->effects[static_cast<std::size_t> (index_)] = previous_;
+}
+
+const char* SetEffectCommand::name() const { return "Effect"; }
+
 SetTrackOutputCommand::SetTrackOutputCommand (std::string trackId, std::string outputId)
     : trackId_ (std::move (trackId)), next_ (outputId.empty() ? "master" : std::move (outputId))
 {

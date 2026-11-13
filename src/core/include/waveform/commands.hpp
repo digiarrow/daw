@@ -234,6 +234,52 @@ private:
     bool applied_ = false;
 };
 
+class RemoveEffectCommand : public EditCommand
+{
+public:
+    RemoveEffectCommand (std::string trackId, int index);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    int index_ = 0;
+    EffectSlot removed_ {};
+    bool applied_ = false;
+};
+
+class MoveEffectCommand : public EditCommand
+{
+public:
+    MoveEffectCommand (std::string trackId, int index, int direction);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    int index_ = 0;
+    int direction_ = 1;
+    bool applied_ = false;
+};
+
+class SetEffectCommand : public EditCommand
+{
+public:
+    SetEffectCommand (std::string trackId, int index, EffectSlot slot);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    int index_ = 0;
+    EffectSlot next_ {};
+    EffectSlot previous_ {};
+    bool applied_ = false;
+};
+
 class AddEffectCommand : public EditCommand
 {
 public:

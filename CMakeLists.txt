@@ -184,6 +184,7 @@ file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/examples" WAVEFORM_EXAMPLES_DIR_CMAKE)
 target_sources(WaveformStudio PRIVATE
     src/app/ArrangementView.cpp
     src/app/BrowserPanel.cpp
+    src/app/DeviceStrip.cpp
     src/app/Main.cpp
     src/app/MainComponent.cpp
     src/app/PianoRoll.cpp

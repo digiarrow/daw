@@ -11,7 +11,7 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 ## Phase 1
 
 - [done] MIDI input, recording, piano roll, arrangement, count-in, audio recording, built-in synth.
-- [partial] Mixer groups, sends, routing, and inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator). **Add Delay** and **Make Group** are in the window. Other inserts are stored on the track and processed in the engine.
+- [done] Inserts. **Add effect** lists EQ, compressor, delay, reverb, limiter, utility, chorus, and saturator. The device strip under the arrangement edits parameters and can move or remove a device. Groups and sends are still engine-side; **Make Group** is in the window.
 - [done] Sampler, FM, and drum. The instrument menu on a MIDI track chooses synth, sampler, FM, or drum. Dropping a browser file on a MIDI track adds a sampler zone rooted at C4.
 - [done] Automation. **Volume lane** draws mixer gain for the selected track. Click adds a point, drag moves it, right-click deletes it. The value is applied per audio block.
 - [done] Session clip grid. **Session** switches with **Arrangement**. Double-click an empty slot to create a clip, click to launch, the scene number launches the row, and **Arrangement** on a column returns that track to the timeline. Launch timing is immediate, next beat, or next bar. A launched clip loops and replaces arrangement clips on that track. Right-click clears a slot. MIDI slots edit in the piano roll.

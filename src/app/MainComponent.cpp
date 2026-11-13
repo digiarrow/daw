@@ -610,15 +610,66 @@ MainComponent::MainComponent()
     addFileButton_.onClick = [this] { chooseAudioFile(); };
     addAudioTrackButton_.onClick = [this] { addTrack (waveform::TrackType::Audio); };
     addMidiTrackButton_.onClick = [this] { addTrack (waveform::TrackType::Midi); };
-    addDelayButton_.onClick = [this]
+    addEffectButton_.onClick = [this]
     {
         if (selectedTrackId_.empty())
+        {
+            setStatus ("Select a track before adding an effect.");
             return;
+        }
 
-        history_.execute (project_, std::make_unique<waveform::AddEffectCommand> (selectedTrackId_, waveform::EffectKind::Delay));
+        juce::PopupMenu menu;
+        menu.addItem (1, "EQ");
+        menu.addItem (2, "Compressor");
+        menu.addItem (3, "Delay");
+        menu.addItem (4, "Reverb");
+        menu.addItem (5, "Limiter");
+        menu.addItem (6, "Utility");
+        menu.addItem (7, "Chorus");
+        menu.addItem (8, "Saturator");
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addEffectButton_), [this] (int result)
+        {
+            waveform::EffectKind kind = waveform::EffectKind::Eq;
+
+            switch (result)
+            {
+                case 2: kind = waveform::EffectKind::Compressor; break;
+                case 3: kind = waveform::EffectKind::Delay; break;
+                case 4: kind = waveform::EffectKind::Reverb; break;
+                case 5: kind = waveform::EffectKind::Limiter; break;
+                case 6: kind = waveform::EffectKind::Utility; break;
+                case 7: kind = waveform::EffectKind::Chorus; break;
+                case 8: kind = waveform::EffectKind::Saturator; break;
+                case 1: break;
+                default: return;
+            }
+
+            history_.execute (project_, std::make_unique<waveform::AddEffectCommand> (selectedTrackId_, kind));
+            syncEngine();
+            refreshHistoryButtons();
+            rebuildSelection();
+            setStatus ("Effect added.");
+        });
+    };
+    deviceStrip_.onChange = [this] (int index, waveform::EffectSlot slot)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetEffectCommand> (selectedTrackId_, index, slot));
         syncEngine();
         refreshHistoryButtons();
-        setStatus ("Delay inserted on the selected track.");
+    };
+    deviceStrip_.onRemove = [this] (int index)
+    {
+        history_.execute (project_, std::make_unique<waveform::RemoveEffectCommand> (selectedTrackId_, index));
+        syncEngine();
+        refreshHistoryButtons();
+        rebuildSelection();
+    };
+    deviceStrip_.onMove = [this] (int index, int direction)
+    {
+        history_.execute (project_, std::make_unique<waveform::MoveEffectCommand> (selectedTrackId_, index, direction));
+        syncEngine();
+        refreshHistoryButtons();
+        rebuildSelection();
     };
     makeGroupButton_.onClick = [this]
     {
@@ -674,10 +725,10 @@ MainComponent::MainComponent()
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
              &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
-             &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
+             &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_,
-             &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
+             &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &trackViewport_ })
     {
         addAndMakeVisible (component);
         silenceFocus (*component);
@@ -804,7 +855,7 @@ void MainComponent::resized()
     trackHeader.removeFromLeft (6);
     loadDemoButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (6);
-    addDelayButton_.setBounds (trackHeader.removeFromLeft (90));
+    addEffectButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (6);
     makeGroupButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (6);
@@ -834,8 +885,10 @@ void MainComponent::resized()
     area.removeFromTop (6);
     masterBounds_ = area.removeFromBottom (52);
     area.removeFromBottom (8);
-    pianoRoll_.setBounds (area.removeFromBottom (260));
-    area.removeFromBottom (8);
+    pianoRoll_.setBounds (area.removeFromBottom (220));
+    area.removeFromBottom (6);
+    deviceStrip_.setBounds (area.removeFromBottom (110));
+    area.removeFromBottom (6);
     const int arrangementHeight = std::clamp (22 + static_cast<int> (project_.tracks.size()) * 32, 180, 280);
     auto timeline = area.removeFromTop (arrangementHeight);
     arrangement_.setBounds (timeline);
@@ -2036,5 +2089,6 @@ void MainComponent::rebuildSelection()
     for (std::size_t index = 0; index < rows_.size() && index < project_.tracks.size(); ++index)
         rows_[index]->setSelected (project_.tracks[index].id == selectedTrackId_);
 
+    deviceStrip_.setTrack (selectedTrack());
     applyModelToControls();
 }

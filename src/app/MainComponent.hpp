@@ -2,6 +2,7 @@
 
 #include "ArrangementView.hpp"
 #include "BrowserPanel.hpp"
+#include "DeviceStrip.hpp"
 #include "DeviceEngine.hpp"
 #include "PianoRoll.hpp"
 #include "RackEditor.hpp"
@@ -117,7 +118,7 @@ private:
     juce::TextButton addFileButton_ { "Add Audio File" };
     juce::TextButton addAudioTrackButton_ { "Add Audio Track" };
     juce::TextButton addMidiTrackButton_ { "Add MIDI Track" };
-    juce::TextButton addDelayButton_ { "Add Delay" };
+    juce::TextButton addEffectButton_ { "Add effect" };
     juce::TextButton makeGroupButton_ { "Make Group" };
     juce::TextButton collectButton_ { "Collect" };
     juce::TextButton exportButton_ { "Export WAV" };
@@ -148,6 +149,7 @@ private:
     juce::ComboBox instrumentBox_;
 
     BrowserPanel browser_;
+    DeviceStrip deviceStrip_;
     ArrangementView arrangement_;
     SessionView session_;
     PianoRoll pianoRoll_;
