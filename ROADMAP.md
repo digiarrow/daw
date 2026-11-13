@@ -12,8 +12,8 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 
 - [done] MIDI input, recording, piano roll, arrangement, count-in, audio recording, built-in synth.
 - [partial] Mixer groups, sends, routing, and inserts (EQ, compressor, delay, reverb, limiter, utility, chorus, saturator). **Add Delay** and **Make Group** are in the window. Other inserts are stored on the track and processed in the engine.
-- [partial] Sampler. Zones render at the played pitch when a track's instrument is `sampler`.
-- [partial] Automation. A `mixer.gainDb` lane is applied per block. Lanes round-trip in the project file.
+- [done] Sampler, FM, and drum. The instrument menu on a MIDI track chooses synth, sampler, FM, or drum. Dropping a browser file on a MIDI track adds a sampler zone rooted at C4.
+- [done] Automation. **Volume lane** draws mixer gain for the selected track. Click adds a point, drag moves it, right-click deletes it. The value is applied per audio block.
 - [done] Session clip grid. **Session** switches with **Arrangement**. Double-click an empty slot to create a clip, click to launch, the scene number launches the row, and **Arrangement** on a column returns that track to the timeline. Launch timing is immediate, next beat, or next bar. A launched clip loops and replaces arrangement clips on that track. Right-click clears a slot. MIDI slots edit in the piano roll.
 - [done] Browser, save-and-collect, WAV export. The browser lists audio files in a folder. Drag a file onto an arrangement lane or a track row to place it. **Folder** changes the directory. **Collect** copies media into `Media/`. **Export WAV** bounces 8 seconds.
 - [done] VST3 hosting and plugin delay compensation. **Plug-in** scans the platform VST3 folders, loads one insert on the selected track, and opens its editor (or a generic editor). Other tracks are delayed by `compensateDelay` so they line up with the plug-in's reported latency. The identifier and state are stored in the project. Offline WAV export does not run hosted plug-ins.
