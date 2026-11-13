@@ -20,7 +20,7 @@ Device, transport, JSON project, undo, audio clips, metronome, test tone.
 
 ### Phase 1 status
 
-You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Packaging scripts produce an ad-hoc signed macOS disk image and a Windows zip. CI uploads both on every push. See [PACKAGING.md](PACKAGING.md). Notarization still needs an Apple Developer ID, which is not stored here. Link and neural stem separation stay skipped.
+You can record MIDI, edit it, record audio, and play both. You can route a track into a group, insert a delay (up to 4 seconds on the long delay lines), launch session clips, drag audio from the browser, choose an instrument, draw volume automation, and load a VST3 insert. Live MIDI notes use sample positions inside the current buffer. Packaging scripts produce an ad-hoc signed macOS disk image and a Windows zip. CI uploads both on every push. A musician’s path through install, recording, and export is in [QUICKSTART.md](QUICKSTART.md). Notarization still needs an Apple Developer ID, which is not stored here. Link and neural stem separation stay skipped.
 
 ## Phase 2 — partial
 
