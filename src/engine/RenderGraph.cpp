@@ -4,6 +4,7 @@
 #include "waveform/mix.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/routing.hpp"
+#include "waveform/sampler.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/timing.hpp"
 
@@ -35,7 +36,34 @@ GraphBuildResult buildGraph (const Project& project,
     for (const auto& track : project.tracks)
     {
         RenderTrack rendered;
+        rendered.gainDb = static_cast<float> (track.mixer.gainDb);
         rendered.gain = dbToLinear (track.mixer.gainDb);
+        rendered.sampler = track.instrument == InstrumentKind::Sampler;
+        rendered.automation = track.automation;
+
+        for (const auto& zone : track.samplerZones)
+        {
+            std::string error;
+            auto location = pathFromUtf8 (zone.file);
+
+            if (projectFile != nullptr && ! location.is_absolute())
+                location = resolveAudioPath (*projectFile, zone.file);
+
+            auto audio = library.load (pathToUtf8 (location), sampleRate, error);
+
+            if (audio == nullptr)
+            {
+                result.warnings.push_back (track.name + " sampler: " + error);
+                continue;
+            }
+
+            RenderSamplerZone renderedZone;
+            renderedZone.rootNote = zone.rootNote;
+            renderedZone.lowNote = zone.lowNote;
+            renderedZone.highNote = zone.highNote;
+            renderedZone.audio = std::move (audio);
+            rendered.zones.push_back (std::move (renderedZone));
+        }
         rendered.pan = static_cast<float> (track.mixer.pan);
         rendered.mute = track.mixer.mute;
         rendered.solo = track.mixer.solo;
@@ -155,6 +183,44 @@ GraphBuildResult buildGraph (const Project& project,
     return result;
 }
 
+void renderTrackInstrument (const RenderTrack& track,
+                           const SoundingNote* notes,
+                           int noteCount,
+                           int frames,
+                           double sampleRate,
+                           SynthVoiceMemory& memory,
+                           float leftGain,
+                           float rightGain,
+                           float* left,
+                           float* right) noexcept
+{
+    if (track.sampler && ! track.zones.empty())
+    {
+        SamplerZoneView views[8];
+        int count = 0;
+
+        for (const auto& zone : track.zones)
+        {
+            if (count >= 8 || zone.audio == nullptr || zone.audio->left.empty())
+                continue;
+
+            views[count].rootNote = zone.rootNote;
+            views[count].lowNote = zone.lowNote;
+            views[count].highNote = zone.highNote;
+            views[count].left = zone.audio->left.data();
+            views[count].right = zone.audio->right.empty() ? nullptr : zone.audio->right.data();
+            views[count].frames = zone.audio->frames();
+            views[count].sourceSampleRate = zone.audio->sampleRate;
+            ++count;
+        }
+
+        renderSamplerNotes (notes, noteCount, views, count, frames, sampleRate, track.patch, leftGain, rightGain, left, right);
+        return;
+    }
+
+    renderSynthNotes (notes, noteCount, frames, sampleRate, track.patch, memory, leftGain, rightGain, left, right);
+}
+
 void renderLinearBlock (const RenderGraph* graph,
                         double sampleRate,
                         double tempoBpm,
@@ -220,6 +286,18 @@ void renderLinearBlock (const RenderGraph* graph,
             mixTrack.clipCount = clipCursor - clipBegin;
             mixTrack.gain = track.gain;
             mixTrack.pan = track.pan;
+
+            if (Timing::isValidSampleRate (sampleRate) && tempoBpm > 0.0)
+            {
+                const double quarter = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
+                double decibels = track.gainDb;
+
+                for (const auto& lane : track.automation)
+                    if (lane.parameter == "mixer.gainDb")
+                        decibels = automationAt (lane, quarter, decibels);
+
+                mixTrack.gain = dbToLinear (decibels);
+            }
             mixTrack.mute = track.mute;
             mixTrack.solo = track.solo;
         }
@@ -288,8 +366,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         ++noteCount;
                     }
 
-                renderSynthNotes (sounding, noteCount, frames, sampleRate, source.patch, synth->memories[index],
-                                  1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index]);
+                renderTrackInstrument (source, sounding, noteCount, frames, sampleRate, synth->memories[index],
+                                      1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index]);
             }
 
             if (scratch->effects != nullptr)
@@ -388,10 +466,10 @@ void renderLinearBlock (const RenderGraph* graph,
             }
 
             const PanGains pan = constantPowerPan (track.pan);
-            renderSynthNotes (sounding, count, frames, sampleRate, track.patch, synth->memories[trackIndex],
-                              track.gain * pan.left * graph->masterGain,
-                              track.gain * pan.right * graph->masterGain,
-                              left, right);
+            renderTrackInstrument (track, sounding, count, frames, sampleRate, synth->memories[trackIndex],
+                                  track.gain * pan.left * graph->masterGain,
+                                  track.gain * pan.right * graph->masterGain,
+                                  left, right);
         }
     }
 

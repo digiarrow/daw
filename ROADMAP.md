@@ -16,7 +16,9 @@ Status values: done, partial, skipped.
 - [ ] VST3 hosting and plugin delay compensation.
 - [ ] Automation lanes.
 - [ ] Session clip grid with quantized launch.
-- [ ] Simple sampler.
+- [partial] Simple sampler. Zones play from a file at the right pitch. Load a zone by putting it in the project; the engine renders it instead of the synth when `instrument` is `sampler`.
+- [partial] Automation lanes. `mixer.gainDb` is applied per block. Other parameters are stored and round-trip.
+- [partial] Session launch timing. `nextLaunchQuarter` snaps to the beat or the bar. The clip grid UI is not in the window yet.
 - [ ] Browser, save-and-collect, WAV export button (offline render already exists).
 
 ## Phase 2
@@ -46,4 +48,4 @@ Status values: done, partial, skipped.
 
 ## Phase 1 status
 
-Groups, sends, and the insert processors are in the engine and covered by tests (utility gain, delay impulse, compressor, group summing). A selected track can gain a delay or be routed into a new group from the window. VST3, automation, the session grid, the sampler, the browser, collect, and a one-click export are still open. Known issue: delay time is capped at about 170 ms because the delay line is fixed-size and real-time safe.
+Groups, sends, and the insert processors are in the engine and covered by tests. A selected track can gain a delay or be routed into a new group from the window. The sampler and volume automation are in the document and the renderer; launch quantize math is tested. VST3, the session grid UI, the browser, collect, and a one-click export are still open. Known issue: delay time is capped at about 170 ms because the delay line is fixed-size and real-time safe.

@@ -32,6 +32,14 @@ struct RenderMidiNote
     double lengthQuarterNotes = 1.0;
 };
 
+struct RenderSamplerZone
+{
+    int rootNote = 60;
+    int lowNote = 0;
+    int highNote = 127;
+    std::shared_ptr<const ClipAudio> audio;
+};
+
 struct RenderMidiClip
 {
     double startQuarterNotes = 0.0;
@@ -51,7 +59,11 @@ struct RenderTrack
     float sendGain[kMaxSends] { 0.0f, 0.0f };
     EffectSlot effects[kMaxInserts] {};
     int effectCount = 0;
+    bool sampler = false;
+    std::vector<RenderSamplerZone> zones;
+    std::vector<AutomationLane> automation;
     float gain = 1.0f;
+    float gainDb = 0.0f;
     float pan = 0.0f;
     bool mute = false;
     bool solo = false;

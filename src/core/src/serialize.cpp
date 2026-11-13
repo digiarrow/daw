@@ -305,6 +305,38 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
         }
     }
 
+    if (node.contains ("instrument") && node.at ("instrument").is_string()
+        && node.at ("instrument").get<std::string>() == "sampler")
+        track.instrument = InstrumentKind::Sampler;
+
+    if (node.contains ("zones") && node.at ("zones").is_array())
+    {
+        for (const auto& zoneNode : node.at ("zones"))
+        {
+            SamplerZone zone;
+            zone.file = requireString (zoneNode, "file");
+            zone.rootNote = std::clamp (requireInt (zoneNode, "root"), 0, 127);
+            zone.lowNote = std::clamp (requireInt (zoneNode, "low"), 0, 127);
+            zone.highNote = std::clamp (requireInt (zoneNode, "high"), 0, 127);
+            track.samplerZones.push_back (std::move (zone));
+        }
+    }
+
+    if (node.contains ("automation") && node.at ("automation").is_array())
+    {
+        for (const auto& laneNode : node.at ("automation"))
+        {
+            AutomationLane lane;
+            lane.parameter = requireString (laneNode, "parameter");
+
+            if (laneNode.contains ("points") && laneNode.at ("points").is_array())
+                for (const auto& pointNode : laneNode.at ("points"))
+                    lane.points.push_back (AutomationPoint { requireNumber (pointNode, "quarterNotes"), requireNumber (pointNode, "value") });
+
+            track.automation.push_back (std::move (lane));
+        }
+    }
+
     if (node.contains ("effects") && node.at ("effects").is_array())
     {
         for (const auto& effectNode : node.at ("effects"))
@@ -424,6 +456,33 @@ json trackToJson (const Track& track)
     }
 
     trackJson["effects"] = std::move (effects);
+    trackJson["instrument"] = track.instrument == InstrumentKind::Sampler ? "sampler" : "synth";
+    json zones = json::array();
+
+    for (const auto& zone : track.samplerZones)
+    {
+        zones.push_back (json {
+            { "file", zone.file },
+            { "high", zone.highNote },
+            { "low", zone.lowNote },
+            { "root", zone.rootNote }
+        });
+    }
+
+    trackJson["zones"] = std::move (zones);
+    json lanes = json::array();
+
+    for (const auto& lane : track.automation)
+    {
+        json points = json::array();
+
+        for (const auto& point : lane.points)
+            points.push_back (json { { "quarterNotes", point.quarterNotes }, { "value", point.value } });
+
+        lanes.push_back (json { { "parameter", lane.parameter }, { "points", std::move (points) } });
+    }
+
+    trackJson["automation"] = std::move (lanes);
     return trackJson;
 }
 

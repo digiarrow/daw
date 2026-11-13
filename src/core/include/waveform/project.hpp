@@ -1,5 +1,6 @@
 #pragma once
 
+#include "waveform/automation.hpp"
 #include "waveform/effects.hpp"
 #include "waveform/timing.hpp"
 
@@ -87,6 +88,20 @@ struct Send
     double levelDb = -96.0;
 };
 
+struct SamplerZone
+{
+    std::string file;
+    int rootNote = 60;
+    int lowNote = 0;
+    int highNote = 127;
+};
+
+enum class InstrumentKind
+{
+    Synth,
+    Sampler
+};
+
 struct Track
 {
     std::string id;
@@ -96,6 +111,9 @@ struct Track
     std::string outputId = "master";
     MixerState mixer;
     SynthPatch synth;
+    InstrumentKind instrument = InstrumentKind::Synth;
+    std::vector<SamplerZone> samplerZones;
+    std::vector<AutomationLane> automation;
     std::vector<Send> sends;
     std::vector<EffectSlot> effects;
     std::vector<Clip> clips;
