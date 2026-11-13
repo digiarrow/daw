@@ -391,15 +391,19 @@ AudioTake DeviceEngine::copyAudioTake() const
 
 void DeviceEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
-    IncomingMidi event;
-
     if (message.isController())
     {
         lastController_.store (message.getControllerNumber(), std::memory_order_relaxed);
         lastControllerValue_.store (message.getControllerValue(), std::memory_order_relaxed);
         controlEpoch_.fetch_add (1, std::memory_order_release);
-        return;
     }
+
+    midiCollector_.addMessageToQueue (message);
+}
+
+void DeviceEngine::applyLiveMessage (const juce::MidiMessage& message, int sampleOffset) noexcept
+{
+    IncomingMidi event;
 
     if (message.isNoteOn())
     {
@@ -417,6 +421,8 @@ void DeviceEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::Midi
     }
 
     event.channel = static_cast<std::uint8_t> (std::clamp (message.getChannel(), 1, 16));
+
+    event.offset = std::max (0, sampleOffset);
     midiQueue_.push (event);
 }
 
@@ -615,7 +621,6 @@ void DeviceEngine::finishRecording() noexcept
 
 void DeviceEngine::drainLiveMidi() noexcept
 {
-    const int micro = static_cast<int> (Transport::quarterNotesToMicro (transport_.musicalPosition().quarterNotes - recordStartQuarter_));
     IncomingMidi event;
 
     while (midiQueue_.pop (event))
@@ -623,6 +628,10 @@ void DeviceEngine::drainLiveMidi() noexcept
         if (event.note > 127)
             continue;
 
+        const double extra = transport_.sampleRate() > 0.0
+                                 ? Timing::quarterNotesFromSamples (event.offset, transport_.sampleRate(), transport_.tempoBpm())
+                                 : 0.0;
+        const int micro = static_cast<int> (Transport::quarterNotesToMicro (transport_.musicalPosition().quarterNotes + extra - recordStartQuarter_));
         auto& slot = live_[event.note];
 
         if (event.velocity > 0)
@@ -631,7 +640,7 @@ void DeviceEngine::drainLiveMidi() noexcept
             slot.releasing = false;
             slot.written = false;
             slot.velocity = event.velocity;
-            slot.age = 0;
+            slot.age = -event.offset;
             slot.releaseAge = 0;
             slot.startMicro = micro;
 
@@ -803,6 +812,9 @@ void DeviceEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 
     bindBlockScratch (blockScratch_, routeStorage_.data(), scratch, effectArena_.get());
     plugins_.prepare (transport_.sampleRate(), scratch);
+    midiCollector_.reset (transport_.sampleRate());
+    longDelayCapacity_ = std::max (8192, static_cast<int> (transport_.sampleRate() * 4.0));
+    longDelay_.assign (static_cast<std::size_t> (16 * 2 * longDelayCapacity_), 0.0f);
 
     sampleRate_.store (static_cast<int> (std::lround (transport_.sampleRate())), std::memory_order_relaxed);
     bufferSize_.store (block, std::memory_order_relaxed);
@@ -850,8 +862,46 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
     }
 
     drainCommands();
+    juce::MidiBuffer midiBlock;
+    midiCollector_.removeNextBlockOfMessages (midiBlock, numSamples);
+
+    for (const auto metadata : midiBlock)
+        applyLiveMessage (metadata.getMessage(), metadata.samplePosition);
+
     drainLiveMidi();
     plugins_.beginBlock();
+
+    if (graph != nullptr && effectArena_ != nullptr && longDelayCapacity_ > 1 && ! longDelay_.empty())
+    {
+        int ordinal = 0;
+        const int tracks = std::min (static_cast<int> (graph->tracks.size()), kMaxRouteTracks);
+
+        for (int track = 0; track < tracks; ++track)
+        {
+            const auto& source = graph->tracks[static_cast<std::size_t> (track)];
+
+            for (int slot = 0; slot < source.effectCount && slot < kMaxInserts; ++slot)
+            {
+                auto& state = effectArena_[static_cast<std::size_t> (track * kMaxInserts + slot)];
+                const auto kind = source.effects[slot].kind;
+                const bool longEffect = kind == EffectKind::Delay || kind == EffectKind::Chorus;
+
+                if (longEffect && ordinal < 16)
+                {
+                    state.externalLeft = longDelay_.data() + static_cast<std::size_t> ((ordinal * 2) * longDelayCapacity_);
+                    state.externalRight = longDelay_.data() + static_cast<std::size_t> ((ordinal * 2 + 1) * longDelayCapacity_);
+                    state.externalCapacity = longDelayCapacity_;
+                    ++ordinal;
+                }
+                else
+                {
+                    state.externalLeft = nullptr;
+                    state.externalRight = nullptr;
+                    state.externalCapacity = 0;
+                }
+            }
+        }
+    }
     ExternalInsert external;
     external.process = [] (void* context, int track, float* left, float* right, int frames)
     {

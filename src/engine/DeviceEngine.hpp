@@ -157,6 +157,7 @@ private:
     void beginRecordingNow() noexcept;
     void finishRecording() noexcept;
     void drainLiveMidi() noexcept;
+    void applyLiveMessage (const juce::MidiMessage& message, int sampleOffset) noexcept;
     void closeOpenMidiNotes() noexcept;
     int collectLiveNotes (SoundingNote* destination, int capacity) const noexcept;
     void advanceLiveNotes (int frames) noexcept;
@@ -224,6 +225,7 @@ private:
         std::uint8_t note = 0;
         std::uint8_t velocity = 0;
         std::uint8_t channel = 1;
+        int offset = 0;
     };
 
     struct LiveSlot
@@ -249,6 +251,9 @@ private:
     static constexpr int kMaxRecordedNotes = 2048;
 
     SpscQueue<IncomingMidi, 256> midiQueue_;
+    juce::MidiMessageCollector midiCollector_;
+    std::vector<float> longDelay_;
+    int longDelayCapacity_ = 0;
     juce::String activeMidi_;
     std::array<SynthVoiceMemory, 64> synthMemory_ {};
     std::array<SessionVoice, 64> session_ {};

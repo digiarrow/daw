@@ -64,6 +64,27 @@ TEST_CASE ("a group bus reaches the master and a direct track does too", "[routi
     REQUIRE (groupL[0] == Catch::Approx (0.5f).margin (1.0e-4));
 }
 
+TEST_CASE ("an external delay line can hold a one second repeat", "[effects]")
+{
+    constexpr int kRate = 48000;
+    constexpr int kDelay = kRate;
+    constexpr int kCapacity = kDelay + 16;
+    std::vector<float> memory (static_cast<std::size_t> (kCapacity * 2), 0.0f);
+    waveform::EffectState state;
+    state.externalLeft = memory.data();
+    state.externalRight = memory.data() + kCapacity;
+    state.externalCapacity = kCapacity;
+    auto slot = waveform::defaultEffect (waveform::EffectKind::Delay);
+    slot.p0 = 1.0;
+    slot.p1 = 0.0;
+    slot.p2 = 1.0;
+    std::vector<float> left (kDelay + 8, 0.0f), right (kDelay + 8, 0.0f);
+    left[0] = right[0] = 1.0f;
+    waveform::processEffect (slot, state, left.data(), right.data(), kDelay + 8, kRate);
+    REQUIRE (std::abs (left[0]) < 1.0e-4f);
+    REQUIRE (left[kDelay] == Catch::Approx (1.0f).margin (1.0e-3));
+}
+
 TEST_CASE ("compressor turns down a hot signal", "[effects]")
 {
     auto slot = waveform::defaultEffect (waveform::EffectKind::Compressor);

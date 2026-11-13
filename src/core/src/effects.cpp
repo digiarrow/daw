@@ -179,18 +179,25 @@ void processEffect (const EffectSlot& slot, EffectState& state, float* left, flo
         }
         case EffectKind::Delay:
         {
-            const int delayFrames = std::clamp (static_cast<int> (std::clamp (slot.p0, 0.0, 2.0) * sr), 1, kDelayCapacity - 1);
+            const bool external = state.externalCapacity > 1 && state.externalLeft != nullptr && state.externalRight != nullptr;
+            float* delayLeft = external ? state.externalLeft : state.delayL;
+            float* delayRight = external ? state.externalRight : state.delayR;
+            const int capacity = external ? state.externalCapacity : kDelayCapacity;
+            const int delayFrames = std::clamp (static_cast<int> (std::clamp (slot.p0, 0.0, 4.0) * sr), 1, capacity - 1);
             const float feedback = clampUnit (slot.p1, 0.0, 0.9);
             const float mix = clampUnit (slot.p2, 0.0, 1.0);
 
+            if (state.write < 0 || state.write >= capacity)
+                state.write = 0;
+
             for (int i = 0; i < frames; ++i)
             {
-                const int read = (state.write + kDelayCapacity - delayFrames) % kDelayCapacity;
-                const float wetL = state.delayL[read];
-                const float wetR = state.delayR[read];
-                state.delayL[state.write] = left[i] + wetL * feedback;
-                state.delayR[state.write] = right[i] + wetR * feedback;
-                state.write = (state.write + 1) % kDelayCapacity;
+                const int read = (state.write + capacity - delayFrames) % capacity;
+                const float wetL = delayLeft[read];
+                const float wetR = delayRight[read];
+                delayLeft[state.write] = left[i] + wetL * feedback;
+                delayRight[state.write] = right[i] + wetR * feedback;
+                state.write = (state.write + 1) % capacity;
                 left[i] = left[i] * (1.0f - mix) + wetL * mix;
                 right[i] = right[i] * (1.0f - mix) + wetR * mix;
             }
@@ -258,13 +265,17 @@ void processEffect (const EffectSlot& slot, EffectState& state, float* left, flo
                 if (state.env > 1.0f)
                     state.env -= 1.0f;
 
+                const bool external = state.externalCapacity > 512 && state.externalLeft != nullptr && state.externalRight != nullptr;
+                float* delayLeft = external ? state.externalLeft : state.delayL;
+                float* delayRight = external ? state.externalRight : state.delayR;
+                const int capacity = external ? state.externalCapacity : kDelayCapacity;
                 const int delay = 200 + static_cast<int> (depth * 180.0f * (0.5f + 0.5f * std::sin (state.env * 2.0f * kPi)));
-                const int read = (state.write + kDelayCapacity - std::clamp (delay, 1, kDelayCapacity - 1)) % kDelayCapacity;
-                const float wetL = state.delayL[read];
-                const float wetR = state.delayR[(read + 90) % kDelayCapacity];
-                state.delayL[state.write] = left[i];
-                state.delayR[state.write] = right[i];
-                state.write = (state.write + 1) % kDelayCapacity;
+                const int read = (state.write + capacity - std::clamp (delay, 1, capacity - 1)) % capacity;
+                const float wetL = delayLeft[read];
+                const float wetR = delayRight[(read + 90) % capacity];
+                delayLeft[state.write] = left[i];
+                delayRight[state.write] = right[i];
+                state.write = (state.write + 1) % capacity;
                 left[i] = left[i] * (1.0f - mix) + wetL * mix;
                 right[i] = right[i] * (1.0f - mix) + wetR * mix;
             }

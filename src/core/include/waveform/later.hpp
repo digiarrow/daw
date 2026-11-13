@@ -24,6 +24,7 @@ struct RackChain
 };
 
 /// Parallel rack: each chain is processed from a copy of the dry buffer and summed.
+/// `scratchLeft` and `scratchRight` must each hold `frames` samples. Nothing is allocated.
 void mixRack (const RackChain* chains,
               int chainCount,
               EffectState* states,
@@ -32,6 +33,8 @@ void mixRack (const RackChain* chains,
               const float* dryRight,
               float* left,
               float* right,
+              float* scratchLeft,
+              float* scratchRight,
               int frames,
               double sampleRate) noexcept;
 

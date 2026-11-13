@@ -46,6 +46,9 @@ struct EffectState
     float combL[4][1024] {};
     float combR[4][1024] {};
     int combPos = 0;
+    float* externalLeft = nullptr;
+    float* externalRight = nullptr;
+    int externalCapacity = 0;
 };
 
 [[nodiscard]] EffectSlot defaultEffect (EffectKind kind) noexcept;

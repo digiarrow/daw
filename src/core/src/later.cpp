@@ -103,31 +103,32 @@ void mixRack (const RackChain* chains,
               const float* dryRight,
               float* left,
               float* right,
+              float* scratchLeft,
+              float* scratchRight,
               int frames,
               double sampleRate) noexcept
 {
-    if (chains == nullptr || dryLeft == nullptr || dryRight == nullptr || left == nullptr || right == nullptr || frames <= 0)
+    if (chains == nullptr || dryLeft == nullptr || dryRight == nullptr || left == nullptr || right == nullptr
+        || scratchLeft == nullptr || scratchRight == nullptr || frames <= 0)
         return;
 
     std::fill (left, left + frames, 0.0f);
     std::fill (right, right + frames, 0.0f);
-    std::vector<float> chainLeft (static_cast<std::size_t> (frames));
-    std::vector<float> chainRight (static_cast<std::size_t> (frames));
 
     for (int chain = 0; chain < chainCount; ++chain)
     {
-        std::copy (dryLeft, dryLeft + frames, chainLeft.begin());
-        std::copy (dryRight, dryRight + frames, chainRight.begin());
+        std::copy (dryLeft, dryLeft + frames, scratchLeft);
+        std::copy (dryRight, dryRight + frames, scratchRight);
         EffectState* chainState = states != nullptr ? states + chain * statesPerChain : nullptr;
 
         if (chainState != nullptr)
             processInserts (chains[chain].effects.data(), static_cast<int> (chains[chain].effects.size()),
-                            chainState, chainLeft.data(), chainRight.data(), frames, sampleRate);
+                            chainState, scratchLeft, scratchRight, frames, sampleRate);
 
         for (int frame = 0; frame < frames; ++frame)
         {
-            left[frame] += chainLeft[static_cast<std::size_t> (frame)] * chains[chain].gain;
-            right[frame] += chainRight[static_cast<std::size_t> (frame)] * chains[chain].gain;
+            left[frame] += scratchLeft[frame] * chains[chain].gain;
+            right[frame] += scratchRight[frame] * chains[chain].gain;
         }
     }
 }

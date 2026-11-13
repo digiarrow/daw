@@ -6,6 +6,17 @@
 #include <cmath>
 #include <vector>
 
+TEST_CASE ("a rack sums preallocated chain buffers", "[later]")
+{
+    waveform::RackChain chains[2];
+    chains[0].gain = 0.5f;
+    chains[1].gain = 0.25f;
+    float dry[4] { 1, 1, 1, 1 };
+    float left[4] {}, right[4] {}, scratchL[4] {}, scratchR[4] {};
+    waveform::mixRack (chains, 2, nullptr, 0, dry, dry, left, right, scratchL, scratchR, 4, 48000.0);
+    REQUIRE (left[0] == Catch::Approx (0.75f));
+}
+
 TEST_CASE ("warp markers interpolate source time", "[later]")
 {
     std::vector<waveform::WarpMarker> markers { { 0.0, 0.0 }, { 2.0, 4.0 } };
