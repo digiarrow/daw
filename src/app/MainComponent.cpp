@@ -30,6 +30,80 @@ void silenceFocus (juce::Component& component)
     component.setMouseClickGrabsKeyboardFocus (false);
 }
 
+class ScriptContent : public juce::Component
+{
+public:
+    ScriptContent()
+    {
+        editor_.setMultiLine (true, true);
+        editor_.setReturnKeyStartsNewLine (true);
+        editor_.setText ("tempo 124\nadd audio Drums\nadd midi Lead\n");
+        run_.setButtonText ("Run");
+        addAndMakeVisible (editor_);
+        addAndMakeVisible (run_);
+        addAndMakeVisible (result_);
+        run_.onClick = [this]
+        {
+            if (onRun)
+                onRun (editor_.getText().toStdString());
+        };
+    }
+
+    void setResult (const juce::String& text) { result_.setText (text, juce::dontSendNotification); }
+
+    std::function<void (const std::string&)> onRun;
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (8);
+        result_.setBounds (area.removeFromBottom (24));
+        run_.setBounds (area.removeFromBottom (28).removeFromLeft (80));
+        area.removeFromBottom (6);
+        editor_.setBounds (area);
+    }
+
+private:
+    juce::TextEditor editor_;
+    juce::TextButton run_;
+    juce::Label result_;
+};
+
+class MapContent : public juce::Component
+{
+public:
+    MapContent()
+    {
+        learn_.setButtonText ("Learn");
+        clear_.setButtonText ("Clear");
+        addAndMakeVisible (learn_);
+        addAndMakeVisible (clear_);
+        addAndMakeVisible (body_);
+        learn_.onClick = [this] { if (onLearn) onLearn(); };
+        clear_.onClick = [this] { if (onClear) onClear(); };
+    }
+
+    void setBody (const juce::String& text) { body_.setText (text, juce::dontSendNotification); }
+
+    std::function<void()> onLearn;
+    std::function<void()> onClear;
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (8);
+        auto row = area.removeFromTop (28);
+        learn_.setBounds (row.removeFromLeft (80));
+        row.removeFromLeft (6);
+        clear_.setBounds (row.removeFromLeft (80));
+        area.removeFromTop (8);
+        body_.setBounds (area);
+    }
+
+private:
+    juce::TextButton learn_;
+    juce::TextButton clear_;
+    juce::Label body_;
+};
+
 class PluginWindow : public juce::DocumentWindow
 {
 public:
@@ -557,6 +631,8 @@ MainComponent::MainComponent()
     collectButton_.onClick = [this] { collectProject(); };
     exportButton_.onClick = [this] { exportWav(); };
     pluginButton_.onClick = [this] { showPluginMenu(); };
+    scriptButton_.onClick = [this] { showScriptConsole(); };
+    midiMapButton_.onClick = [this] { showMidiMap(); };
 
     sampleRateBox_.onChange = [this]
     {
@@ -589,7 +665,7 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_,
+             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
     {
         addAndMakeVisible (component);
@@ -782,6 +858,12 @@ void MainComponent::timerCallback()
         refreshDeviceControls();
         refreshMidiInputs();
         syncEngine();
+    }
+
+    if (engine_.controlEpoch() != seenControlEpoch_)
+    {
+        seenControlEpoch_ = engine_.controlEpoch();
+        applyLearnedControl();
     }
 
     if (engine_.recordEpoch() != seenRecordEpoch_)
@@ -1754,6 +1836,92 @@ void MainComponent::showPluginMenu()
                             const int latency = engine_.plugins().latency (index);
                             setStatus ("Loaded " + description.name + ". Latency " + juce::String (latency) + " samples, compensated on the other tracks.");
                         });
+}
+
+void MainComponent::showScriptConsole()
+{
+    auto* content = new ScriptContent();
+    content->setSize (420, 280);
+    content->onRun = [this, content] (const std::string& text)
+    {
+        const auto result = waveform::runScript (project_, text);
+        content->setResult (result.message);
+        rebuildTracks();
+        applyModelToControls();
+        syncEngine();
+        setStatus (result.ok ? "Script applied." : juce::String (result.message));
+    };
+
+    scriptWindow_ = std::make_unique<juce::DocumentWindow> ("Script",
+                                                            juce::Colour (waveform::StudioLookAndFeel::kPanel),
+                                                            juce::DocumentWindow::closeButton);
+    scriptWindow_->setContentOwned (content, true);
+    scriptWindow_->setUsingNativeTitleBar (true);
+    scriptWindow_->centreWithSize (440, 320);
+    scriptWindow_->setVisible (true);
+}
+
+void MainComponent::showMidiMap()
+{
+    auto* content = new MapContent();
+    content->setSize (360, 220);
+    content->onLearn = [this, content]
+    {
+        learningControl_ = true;
+        content->setBody ("Move a controller. The next CC is mapped to the selected track's volume.");
+        setStatus ("MIDI learn is armed.");
+    };
+    content->onClear = [this, content]
+    {
+        controlMap_.clear();
+        learningControl_ = false;
+        content->setBody ("No mappings.");
+    };
+    content->setBody ("No mappings. Learn assigns a CC to volume.");
+
+    midiMapWindow_ = std::make_unique<juce::DocumentWindow> ("MIDI map",
+                                                             juce::Colour (waveform::StudioLookAndFeel::kPanel),
+                                                             juce::DocumentWindow::closeButton);
+    midiMapWindow_->setContentOwned (content, true);
+    midiMapWindow_->setUsingNativeTitleBar (true);
+    midiMapWindow_->centreWithSize (380, 260);
+    midiMapWindow_->setVisible (true);
+}
+
+void MainComponent::applyLearnedControl()
+{
+    const int cc = engine_.lastController();
+    const int value = engine_.lastControllerValue();
+
+    if (cc < 0)
+        return;
+
+    if (learningControl_)
+    {
+        learningControl_ = false;
+        controlMap_.erase (std::remove_if (controlMap_.begin(), controlMap_.end(), [cc] (const waveform::ControlMapping& mapping) { return mapping.cc == cc; }), controlMap_.end());
+        controlMap_.push_back (waveform::ControlMapping { cc, "mixer.gainDb" });
+        setStatus ("CC " + juce::String (cc) + " controls the selected track volume.");
+
+        if (auto* content = dynamic_cast<MapContent*> (midiMapWindow_ != nullptr ? midiMapWindow_->getContentComponent() : nullptr))
+        {
+            juce::String text;
+
+            for (const auto& mapping : controlMap_)
+                text << "CC " << mapping.cc << "  ->  volume\n";
+
+            content->setBody (text);
+        }
+    }
+
+    if (selectedTrackId_.empty())
+        return;
+
+    if (waveform::applyControlChange (project_, selectedTrackId_, cc, value, controlMap_))
+    {
+        syncEngine();
+        rebuildTracks();
+    }
 }
 
 void MainComponent::showDeviceSettings()

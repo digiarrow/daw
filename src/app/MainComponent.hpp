@@ -6,6 +6,7 @@
 #include "PianoRoll.hpp"
 #include "SessionView.hpp"
 #include "waveform/commands.hpp"
+#include "waveform/later.hpp"
 #include "waveform/project.hpp"
 
 #include <juce_audio_utils/juce_audio_utils.h>
@@ -82,6 +83,9 @@ private:
     void showPluginMenu();
     void syncPlugins();
     void openPluginEditor();
+    void showScriptConsole();
+    void showMidiMap();
+    void applyLearnedControl();
 
     [[nodiscard]] std::filesystem::path projectPath() const;
     [[nodiscard]] waveform::Track* selectedTrack();
@@ -122,6 +126,8 @@ private:
     juce::TextButton sessionButton_ { "Session" };
     juce::TextButton pluginButton_ { "Plug-in" };
     juce::TextButton automationButton_ { "Volume lane" };
+    juce::TextButton scriptButton_ { "Script" };
+    juce::TextButton midiMapButton_ { "MIDI map" };
 
     juce::ToggleButton loopButton_ { "Loop" };
     juce::ToggleButton metronomeButton_ { "Click" };
@@ -149,6 +155,11 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser_;
     std::unique_ptr<juce::DocumentWindow> deviceWindow_;
     std::unique_ptr<juce::DocumentWindow> pluginWindow_;
+    std::unique_ptr<juce::DocumentWindow> scriptWindow_;
+    std::unique_ptr<juce::DocumentWindow> midiMapWindow_;
+    std::vector<waveform::ControlMapping> controlMap_;
+    bool learningControl_ = false;
+    int seenControlEpoch_ = 0;
     std::vector<juce::PluginDescription> scannedPlugins_;
 
     juce::Rectangle<int> transportBounds_;

@@ -109,6 +109,9 @@ public:
     bool launchSession (int trackIndex, int scene, int quantize);
     [[nodiscard]] int sessionScene (int trackIndex) const noexcept;
     [[nodiscard]] int sessionPending (int trackIndex) const noexcept;
+    [[nodiscard]] int controlEpoch() const noexcept;
+    [[nodiscard]] int lastController() const noexcept;
+    [[nodiscard]] int lastControllerValue() const noexcept;
 
     /// Enables one MIDI input. An empty id disables input. Message thread only.
     void setMidiInput (const juce::String& deviceIdentifier);
@@ -204,6 +207,9 @@ private:
     std::atomic<int> deviceGeneration_ { 0 };
     std::atomic<int> structureOverflow_ { 0 };
     std::atomic<int> monitorTrack_ { -1 };
+    std::atomic<int> controlEpoch_ { 0 };
+    std::atomic<int> lastController_ { -1 };
+    std::atomic<int> lastControllerValue_ { 0 };
     std::atomic<int> recordingFlag_ { 0 };
     std::atomic<int> countingFlag_ { 0 };
     std::atomic<int> recordEpoch_ { 0 };

@@ -235,6 +235,21 @@ int DeviceEngine::sessionPending (int trackIndex) const noexcept
     return sessionPending_[static_cast<std::size_t> (trackIndex)].load (std::memory_order_relaxed);
 }
 
+int DeviceEngine::controlEpoch() const noexcept
+{
+    return controlEpoch_.load (std::memory_order_acquire);
+}
+
+int DeviceEngine::lastController() const noexcept
+{
+    return lastController_.load (std::memory_order_relaxed);
+}
+
+int DeviceEngine::lastControllerValue() const noexcept
+{
+    return lastControllerValue_.load (std::memory_order_relaxed);
+}
+
 void DeviceEngine::applySession (const EngineCommand& command) noexcept
 {
     if (command.type != EngineCommandType::LaunchSession)
@@ -377,6 +392,14 @@ AudioTake DeviceEngine::copyAudioTake() const
 void DeviceEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
     IncomingMidi event;
+
+    if (message.isController())
+    {
+        lastController_.store (message.getControllerNumber(), std::memory_order_relaxed);
+        lastControllerValue_.store (message.getControllerValue(), std::memory_order_relaxed);
+        controlEpoch_.fetch_add (1, std::memory_order_release);
+        return;
+    }
 
     if (message.isNoteOn())
     {
