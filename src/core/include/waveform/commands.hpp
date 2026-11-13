@@ -343,6 +343,21 @@ private:
     bool applied_ = false;
 };
 
+class AddAudioTakeCommand : public EditCommand
+{
+public:
+    AddAudioTakeCommand (std::string trackId, std::string clipId, ClipTake take);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    ClipTake take_;
+    bool applied_ = false;
+};
+
 class SetClipMarkersCommand : public EditCommand
 {
 public:

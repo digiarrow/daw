@@ -93,6 +93,7 @@ MixerState mixerFromJson (const json& node)
 }
 
 json warpToJson (const std::vector<WarpMarker>& markers);
+json takesToJson (const std::vector<ClipTake>& takes);
 json compToJson (const std::vector<CompSegment>& segments);
 
 json audioClipToJson (const AudioClip& clip)
@@ -106,9 +107,20 @@ json audioClipToJson (const AudioClip& clip)
         { "offsetSeconds", clip.offsetSeconds },
         { "comp", compToJson (clip.comp) },
         { "startQuarterNotes", clip.startQuarterNotes },
+        { "takes", takesToJson (clip.takes) },
         { "type", "audio" },
         { "warp", warpToJson (clip.warp) }
     };
+}
+
+json takesToJson (const std::vector<ClipTake>& takes)
+{
+    json values = json::array();
+
+    for (const auto& take : takes)
+        values.push_back (json { { "file", take.file }, { "name", take.name } });
+
+    return values;
 }
 
 json warpToJson (const std::vector<WarpMarker>& markers)
@@ -201,6 +213,17 @@ AudioClip audioClipFromJson (const json& node, std::unordered_set<std::string>& 
     gain.gainDb = clip.gainDb;
     clampMixer (gain);
     clip.gainDb = gain.gainDb;
+
+    if (node.contains ("takes") && node.at ("takes").is_array())
+    {
+        for (const auto& takeNode : node.at ("takes"))
+        {
+            ClipTake take;
+            take.name = requireString (takeNode, "name");
+            take.file = requireString (takeNode, "file");
+            clip.takes.push_back (std::move (take));
+        }
+    }
 
     if (node.contains ("warp") && node.at ("warp").is_array())
         for (const auto& marker : node.at ("warp"))

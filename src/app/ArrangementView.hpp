@@ -27,6 +27,7 @@ public:
     std::function<void (const std::string& trackId, std::vector<waveform::AutomationPoint> points)> onAutomation;
     std::function<void (const std::string& trackId, const std::string& clipId, std::vector<waveform::WarpMarker> warp, std::vector<waveform::CompSegment> comp)> onMarkers;
     std::function<void (const std::string& path, const std::string& trackId, double startQuarterNotes)> onDropFile;
+    std::function<void (const std::string& path, const std::string& trackId, const std::string& clipId)> onAddTake;
 
     bool isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& details) override;
     void itemDropped (const juce::DragAndDropTarget::SourceDetails& details) override;

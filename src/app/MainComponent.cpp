@@ -430,6 +430,16 @@ MainComponent::MainComponent()
     };
     automationButton_.setClickingTogglesState (true);
     automationButton_.setToggleState (true, juce::dontSendNotification);
+    arrangement_.onAddTake = [this] (const std::string& path, const std::string& trackId, const std::string& clipId)
+    {
+        waveform::ClipTake take;
+        take.name = juce::File (path).getFileNameWithoutExtension().toStdString();
+        take.file = path;
+        history_.execute (project_, std::make_unique<waveform::AddAudioTakeCommand> (trackId, clipId, std::move (take)));
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus ("Take added. Alt-click the clip to comp it in.");
+    };
     arrangement_.onDropFile = [this] (const std::string& path, const std::string& trackId, double start)
     {
         dropAudioFile (juce::File (path), trackId, start);

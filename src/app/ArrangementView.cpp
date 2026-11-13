@@ -79,6 +79,16 @@ double ArrangementView::clipLengthQuarters (const waveform::Clip& clip) const
 {
     if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
     {
+        if (! audio->warp.empty())
+        {
+            double end = 0.25;
+
+            for (const auto& marker : audio->warp)
+                end = std::max (end, marker.timelineQuarters);
+
+            return end;
+        }
+
         const double tempo = project_ != nullptr ? project_->tempoBpm : 120.0;
         return std::max (0.25, audio->lengthSeconds * tempo / 60.0);
     }
@@ -155,10 +165,21 @@ void ArrangementView::itemDropped (const juce::DragAndDropTarget::SourceDetails&
     if (hit.trackIndex < 0 || hit.trackIndex >= static_cast<int> (project_->tracks.size()))
         return;
 
+    const auto& track = project_->tracks[static_cast<std::size_t> (hit.trackIndex)];
+
+    if (juce::ModifierKeys::getCurrentModifiers().isShiftDown() && hit.clipIndex >= 0 && onAddTake)
+    {
+        const auto& clip = track.clips[static_cast<std::size_t> (hit.clipIndex)];
+
+        if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
+        {
+            onAddTake (details.description.toString().toStdString(), track.id, audio->id);
+            return;
+        }
+    }
+
     const auto start = std::max (0.0, snapped (quarterAt (details.localPosition.x)));
-    onDropFile (details.description.toString().toStdString(),
-                project_->tracks[static_cast<std::size_t> (hit.trackIndex)].id,
-                start);
+    onDropFile (details.description.toString().toStdString(), track.id, start);
 }
 
 void ArrangementView::paint (juce::Graphics& graphics)

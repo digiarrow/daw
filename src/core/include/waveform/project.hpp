@@ -59,6 +59,13 @@ struct CompSegment
     int takeIndex = 0;
 };
 
+/// An alternate recording. Take 0 is the clip's own file. Later takes are these.
+struct ClipTake
+{
+    std::string name;
+    std::string file;
+};
+
 /// Unwarped audio. The file plays at its natural speed.
 /// `startQuarterNotes` is where it sits on the timeline.
 /// `offsetSeconds` / `lengthSeconds` select a region of the source file.
@@ -74,6 +81,7 @@ struct AudioClip
     double gainDb = 0.0;
     std::vector<WarpMarker> warp;
     std::vector<CompSegment> comp;
+    std::vector<ClipTake> takes;
 };
 
 struct MidiNote

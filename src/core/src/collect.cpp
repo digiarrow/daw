@@ -73,7 +73,12 @@ CollectResult collectMedia (Project& project, const std::filesystem::path& proje
     {
         for (auto& clip : track.clips)
             if (auto* audio = std::get_if<AudioClip> (&clip))
+            {
                 copyIntoMedia (audio->file, projectFile, media, result);
+
+                for (auto& take : audio->takes)
+                    copyIntoMedia (take.file, projectFile, media, result);
+            }
 
         for (auto& zone : track.samplerZones)
             copyIntoMedia (zone.file, projectFile, media, result);

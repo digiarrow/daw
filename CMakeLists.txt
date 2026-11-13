@@ -125,11 +125,16 @@ add_library(waveform_core STATIC
     src/core/src/paths.cpp
     src/core/src/project.cpp
     src/core/src/serialize.cpp
+    src/core/src/stretch.cpp
     src/core/src/synthesis.cpp
     src/core/src/timing.cpp
     src/core/src/transport.cpp
 )
 target_include_directories(waveform_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src/core/include")
+target_include_directories(waveform_core PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/signalsmith-stretch/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/signalsmith-linear/include"
+)
 target_link_libraries(waveform_core PUBLIC nlohmann_json::nlohmann_json)
 target_compile_features(waveform_core PUBLIC cxx_std_20)
 
@@ -212,6 +217,7 @@ if(WAVEFORM_BUILD_TESTS)
         tests/test_later.cpp
         tests/test_sampler.cpp
         tests/test_session.cpp
+        tests/test_stretch.cpp
         tests/test_midi.cpp
         tests/test_mix.cpp
         tests/test_project.cpp

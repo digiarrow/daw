@@ -6,6 +6,7 @@
 #include "waveform/routing.hpp"
 #include "waveform/later.hpp"
 #include "waveform/sampler.hpp"
+#include "waveform/stretch.hpp"
 #include "waveform/session.hpp"
 #include "waveform/synth.hpp"
 #include "waveform/timing.hpp"
@@ -212,6 +213,61 @@ GraphBuildResult buildGraph (const Project& project,
                 renderedClip.offsetSeconds = clip->offsetSeconds;
                 renderedClip.lengthSeconds = clip->lengthSeconds;
                 renderedClip.gain = dbToLinear (clip->gainDb);
+
+                if (clip->warp.size() >= 2 || ! clip->comp.empty())
+                {
+                    std::vector<std::shared_ptr<const ClipAudio>> loadedTakes;
+                    StretchSource extrasStorage[8];
+                    int extraCount = 0;
+
+                    for (const auto& take : clip->takes)
+                    {
+                        if (extraCount >= 8)
+                            break;
+
+                        auto takePath = pathFromUtf8 (take.file);
+
+                        if (projectFile != nullptr && ! takePath.is_absolute())
+                            takePath = resolveAudioPath (*projectFile, take.file);
+
+                        std::string takeError;
+                        auto takeAudio = library.load (pathToUtf8 (takePath), sampleRate, takeError);
+
+                        if (takeAudio == nullptr)
+                        {
+                            result.warnings.push_back (track.name + " / " + clip->name + " take: " + takeError);
+                            continue;
+                        }
+
+                        extrasStorage[extraCount].left = takeAudio->left.data();
+                        extrasStorage[extraCount].right = takeAudio->right.empty() ? nullptr : takeAudio->right.data();
+                        extrasStorage[extraCount].frames = takeAudio->frames();
+                        loadedTakes.push_back (std::move (takeAudio));
+                        ++extraCount;
+                    }
+
+                    StretchSource primary;
+                    primary.left = renderedClip.audio->left.data();
+                    primary.right = renderedClip.audio->right.empty() ? nullptr : renderedClip.audio->right.data();
+                    primary.frames = renderedClip.audio->frames();
+                    std::vector<float> bakedLeft;
+                    std::vector<float> bakedRight;
+                    const double secondsPerQuarter = 60.0 / std::max (1.0, project.tempoBpm);
+                    renderStretch (primary, extrasStorage, extraCount, clip->warp, clip->comp, sampleRate, secondsPerQuarter,
+                                   clip->offsetSeconds, clip->lengthSeconds, bakedLeft, bakedRight);
+
+                    if (! bakedLeft.empty())
+                    {
+                        auto baked = std::make_shared<ClipAudio>();
+                        baked->sampleRate = sampleRate;
+                        baked->left = std::move (bakedLeft);
+                        baked->right = std::move (bakedRight);
+                        renderedClip.audio = std::move (baked);
+                        renderedClip.offsetSeconds = 0.0;
+                        renderedClip.lengthSeconds = static_cast<double> (renderedClip.audio->frames()) / sampleRate;
+                    }
+                }
+
                 rendered.clips.push_back (std::move (renderedClip));
                 ++result.loadedClips;
             }

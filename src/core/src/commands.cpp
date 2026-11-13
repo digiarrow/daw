@@ -1009,6 +1009,33 @@ void SetClipMarkersCommand::revert (Project& project)
 
 const char* SetClipMarkersCommand::name() const { return "Clip Markers"; }
 
+AddAudioTakeCommand::AddAudioTakeCommand (std::string trackId, std::string clipId, ClipTake take)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), take_ (std::move (take))
+{
+    if (take_.name.empty())
+        take_.name = "Take";
+}
+
+void AddAudioTakeCommand::apply (Project& project)
+{
+    auto* clip = findAudioClip (project, trackId_, clipId_);
+    applied_ = clip != nullptr && ! take_.file.empty();
+
+    if (applied_)
+        clip->takes.push_back (take_);
+}
+
+void AddAudioTakeCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* clip = findAudioClip (project, trackId_, clipId_); clip != nullptr && ! clip->takes.empty())
+        clip->takes.pop_back();
+}
+
+const char* AddAudioTakeCommand::name() const { return "Add Take"; }
+
 AddSamplerZoneCommand::AddSamplerZoneCommand (std::string trackId, SamplerZone zone)
     : trackId_ (std::move (trackId)), zone_ (std::move (zone))
 {

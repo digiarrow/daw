@@ -20,6 +20,7 @@ What this slice does:
 - The browser lists audio files. Drag one onto an arrangement lane or a track row. **Folder** picks a different directory.
 - **Plug-in** scans VST3 folders, loads one insert on the selected track, and opens its editor. Other tracks are delayed to match the plug-in's latency.
 - The instrument menu sets a MIDI track to the synth, sampler, FM, or drum voice. Drop an audio file on a MIDI track to make it a sampler.
+- Ctrl-click an audio clip to drop a warp marker. Playback time-stretches between markers with Signalsmith Stretch (MIT) and keeps the pitch. Shift-drop another file onto the clip to add a take, then Alt-click to comp that take in.
 
 There is still no time-stretch and no plug-in hosting. The synth is the built-in instrument, not a hosted plug-in.
 

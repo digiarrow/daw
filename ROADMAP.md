@@ -24,14 +24,14 @@ You can record MIDI, edit it, record audio, and play both. You can route a track
 
 ## Phase 2 — partial
 
-- [partial] Warp markers. Ctrl-click an audio clip to add one. They are drawn on the clip. Playback does not time-stretch from them yet.
-- [partial] Comp lanes. Alt-click an audio clip to add a one-beat segment. The segments are drawn. Playback still uses the whole file, not the take index.
+- [done] Warp markers time-stretch playback with [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) (MIT; Signalsmith Linear, also MIT, is vendored beside it). Ctrl-click an audio clip to add a marker. Pitch stays put while the duration follows the markers. Rubber Band was not used; its GPL licence does not fit this tree.
+- [done] Comp segments choose the take you hear. Shift-drop a file onto an audio clip to add a take. Alt-click paints a one-beat segment on the next take. Take 0 is the clip's own file.
 - [done] Parallel effect racks (`mixRack`) use caller-provided scratch buffers and do not allocate. They are not a rack editor in the window.
 - [skipped] Ableton Link. The official library is GPLv2 and is not vendored. `linkStatus()` is a stub that stays disabled until that licence is chosen on purpose.
 
 ### Phase 2 status
 
-Warp markers and comp segments can be drawn on audio clips. Racks no longer allocate. There is no rack editor, and playback ignores warp and comp. Link is an intentional skip.
+Warp playback uses Signalsmith Stretch. Comp segments switch takes. There is no rack editor yet. Link is an intentional skip.
 
 ## Phase 3 — partial
 
