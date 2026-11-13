@@ -20,6 +20,7 @@ struct RouteEndpoint
     float panRight = 0.70710678f;
     int sendBus[kMaxSends] { -1, -1 };
     float sendGain[kMaxSends] { 0.0f, 0.0f };
+    bool sendPre[kMaxSends] { false, false };
 };
 
 /// Sums track buffers into buses. Group tracks contribute their bus back to the master.

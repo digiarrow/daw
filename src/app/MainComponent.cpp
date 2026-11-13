@@ -19,7 +19,7 @@
 namespace
 {
 
-constexpr int kRowHeight = 84;
+constexpr int kRowHeight = 118;
 
 juce::String quarterText (double value)
 {
@@ -169,12 +169,12 @@ class MainComponent::TrackRow : public juce::Component,
                                 public juce::DragAndDropTarget
 {
 public:
-    TrackRow (waveform::Track& track, bool selected)
+    TrackRow (waveform::Track& track, bool selected, const waveform::Project& project)
         : id_ (track.id)
     {
         name_.setText (track.name, juce::dontSendNotification);
         name_.setFont (juce::Font (juce::FontOptions (16.0f)));
-        kind_.setText (track.type == waveform::TrackType::Audio ? "Audio" : "MIDI", juce::dontSendNotification);
+        kind_.setText (track.returns ? "Return" : track.type == waveform::TrackType::Audio ? "Audio" : "MIDI", juce::dontSendNotification);
         kind_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kDim));
         summary_.setColour (juce::Label::textColourId, juce::Colour (waveform::StudioLookAndFeel::kDim));
         summary_.setText (summaryFor (track), juce::dontSendNotification);
@@ -199,7 +199,54 @@ public:
         mute_.setToggleState (track.mixer.mute, juce::dontSendNotification);
         solo_.setToggleState (track.mixer.solo, juce::dontSendNotification);
 
-        juce::Component* children[] = { &name_, &kind_, &summary_, &gain_, &pan_, &mute_, &solo_, &remove_ };
+        sendLevel_.setRange (-60.0, 6.0, 0.1);
+        sendLevel_.setSkewFactorFromMidPoint (-12.0);
+        sendLevel_.setSliderStyle (juce::Slider::LinearHorizontal);
+        sendLevel_.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 18);
+        sendLevel_.setValue (track.sends.empty() ? -60.0 : track.sends.front().levelDb, juce::dontSendNotification);
+        sendPre_.setButtonText ("Pre");
+        sendPre_.setClickingTogglesState (true);
+        sendPre_.setToggleState (! track.sends.empty() && track.sends.front().preFader, juce::dontSendNotification);
+        sendTarget_.addItem ("No return", 1);
+        int item = 2;
+        returnIds_.clear();
+
+        for (const auto& candidate : project.tracks)
+            if (candidate.returns)
+            {
+                returnIds_.push_back (candidate.id);
+                sendTarget_.addItem (candidate.name, item++);
+            }
+
+        int selectedTarget = 1;
+
+        if (! track.sends.empty())
+        {
+            item = 2;
+
+            for (const auto& candidate : project.tracks)
+            {
+                if (! candidate.returns)
+                    continue;
+
+                if (candidate.id == track.sends.front().targetId)
+                    selectedTarget = item;
+
+                ++item;
+            }
+        }
+
+        sendTarget_.setSelectedId (selectedTarget, juce::dontSendNotification);
+        const bool showSend = ! track.returns;
+        sendLevel_.setVisible (showSend);
+        sendPre_.setVisible (showSend);
+        sendTarget_.setVisible (showSend);
+        sendLevel_.onDragEnd = [this] { publishSend(); };
+        sendPre_.onClick = [this] { publishSend(); };
+        sendTarget_.onChange = [this] { publishSend(); };
+
+        juce::Component* children[] = { &name_, &kind_, &summary_, &gain_, &pan_, &mute_, &solo_, &remove_,
+                                        &sendLevel_, &sendPre_, &sendTarget_ };
 
         for (auto* component : children)
             addAndMakeVisible (component);
@@ -231,6 +278,7 @@ public:
     std::function<void (waveform::MixerState)> onPreview;
     std::function<void (waveform::MixerState, waveform::MixerState)> onCommit;
     std::function<void (waveform::MixerState)> onImmediate;
+    std::function<void (waveform::Send)> onSend;
     std::function<void (const juce::String& path)> onDropFile;
 
     bool isInterestedInDragSource (const juce::DragAndDropTarget::SourceDetails& details) override
@@ -266,6 +314,10 @@ public:
         mute_.setBounds (controls.removeFromRight (36).reduced (2, 2));
         pan_.setBounds (controls.removeFromRight (170).reduced (4, 0));
         gain_.setBounds (controls.reduced (0, 0));
+        auto send = area.removeFromTop (26);
+        sendTarget_.setBounds (send.removeFromRight (140).reduced (2, 2));
+        sendPre_.setBounds (send.removeFromRight (52).reduced (2, 2));
+        sendLevel_.setBounds (send.reduced (0, 2));
     }
 
     void mouseDown (const juce::MouseEvent&) override
@@ -292,6 +344,23 @@ private:
         }
 
         return names.joinIntoString ("   ·   ");
+    }
+
+    void publishSend()
+    {
+        if (onSend == nullptr)
+            return;
+
+        waveform::Send send;
+        send.levelDb = sendLevel_.getValue();
+        send.preFader = sendPre_.getToggleState();
+        send.targetId = "none";
+        const int selected = sendTarget_.getSelectedId();
+
+        if (selected >= 2 && selected - 2 < static_cast<int> (returnIds_.size()))
+            send.targetId = returnIds_[static_cast<std::size_t> (selected - 2)];
+
+        onSend (send);
     }
 
     waveform::MixerState mixer() const
@@ -329,7 +398,10 @@ private:
     std::string id_;
     juce::Label name_, kind_, summary_;
     juce::Slider gain_, pan_;
-    juce::TextButton mute_, solo_, remove_;
+    juce::TextButton mute_, solo_, remove_, sendPre_;
+    juce::Slider sendLevel_;
+    juce::ComboBox sendTarget_;
+    std::vector<std::string> returnIds_;
     bool selected_ = false;
     bool dragging_ = false;
     waveform::MixerState dragStart_;
@@ -695,6 +767,20 @@ MainComponent::MainComponent()
         refreshHistoryButtons();
         setStatus ("Group created. The selected track now feeds it.");
     };
+    addReturnButton_.onClick = [this]
+    {
+        const auto count = std::count_if (project_.tracks.begin(), project_.tracks.end(),
+                                          [] (const waveform::Track& track) { return track.returns; });
+        auto command = std::make_unique<waveform::AddTrackCommand> (waveform::TrackType::Audio, "Return " + std::string (1, static_cast<char> ('A' + std::min<int> (count, 25))));
+        const auto id = command->trackId();
+        history_.execute (project_, std::move (command));
+        history_.execute (project_, std::make_unique<waveform::SetReturnCommand> (id, true));
+        selectedTrackId_ = id;
+        syncEngine();
+        rebuildTracks();
+        refreshHistoryButtons();
+        setStatus ("Return added. Set a send on another track to feed it.");
+    };
     loadDemoButton_.onClick = [this] { loadDemo(); };
     openButton_.onClick = [this] { chooseProjectOpen(); };
     recentButton_.onClick = [this] { showRecent(); };
@@ -737,7 +823,7 @@ MainComponent::MainComponent()
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
              &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
-             &loadDemoButton_, &openButton_, &recentButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
+             &loadDemoButton_, &openButton_, &recentButton_, &saveButton_, &collectButton_, &exportButton_, &addEffectButton_, &makeGroupButton_, &addReturnButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_, &lfoButton_, &audioToMidiButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &deviceStrip_, &trackViewport_ })
@@ -871,6 +957,8 @@ void MainComponent::resized()
     addEffectButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (6);
     makeGroupButton_.setBounds (trackHeader.removeFromLeft (100));
+    trackHeader.removeFromLeft (4);
+    addReturnButton_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (6);
     arrangementButton_.setBounds (trackHeader.removeFromLeft (110));
     trackHeader.removeFromLeft (4);
@@ -1117,7 +1205,7 @@ void MainComponent::rebuildTracks()
 
     for (auto& track : project_.tracks)
     {
-        auto row = std::make_unique<TrackRow> (track, track.id == selectedTrackId_);
+        auto row = std::make_unique<TrackRow> (track, track.id == selectedTrackId_, project_);
         const auto id = track.id;
 
         row->onSelect = [this, id]
@@ -1160,6 +1248,12 @@ void MainComponent::rebuildTracks()
         row->onImmediate = [this, id] (waveform::MixerState mixer)
         {
             history_.execute (project_, std::make_unique<waveform::SetMixerCommand> (id, mixer));
+            syncEngine();
+            refreshHistoryButtons();
+        };
+        row->onSend = [this, id] (waveform::Send send)
+        {
+            history_.execute (project_, std::make_unique<waveform::SetSendCommand> (id, 0, send));
             syncEngine();
             refreshHistoryButtons();
         };

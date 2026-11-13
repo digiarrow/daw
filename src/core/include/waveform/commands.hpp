@@ -309,6 +309,22 @@ private:
     bool applied_ = false;
 };
 
+class SetReturnCommand : public EditCommand
+{
+public:
+    SetReturnCommand (std::string trackId, bool isReturn);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    bool next_ = false;
+    bool previousReturn_ = false;
+    bool previousGroup_ = false;
+    bool applied_ = false;
+};
+
 class SetSendCommand : public EditCommand
 {
 public:

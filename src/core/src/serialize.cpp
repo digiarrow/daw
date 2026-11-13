@@ -375,6 +375,9 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
     if (node.contains ("group") && node.at ("group").is_boolean())
         track.group = node.at ("group").get<bool>();
 
+    if (node.contains ("returns") && node.at ("returns").is_boolean())
+        track.returns = node.at ("returns").get<bool>();
+
     if (node.contains ("output") && node.at ("output").is_string())
         track.outputId = node.at ("output").get<std::string>();
 
@@ -388,6 +391,7 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
             Send send;
             send.targetId = requireString (sendNode, "target");
             send.levelDb = requireNumber (sendNode, "levelDb");
+            send.preFader = sendNode.contains ("pre") && sendNode.at ("pre").is_boolean() && sendNode.at ("pre").get<bool>();
             track.sends.push_back (std::move (send));
         }
     }
@@ -656,11 +660,12 @@ json trackToJson (const Track& track)
         trackJson["synth"] = synthToJson (track.synth);
 
     trackJson["group"] = track.group;
+    trackJson["returns"] = track.returns;
     trackJson["output"] = track.outputId.empty() ? "master" : track.outputId;
     json sends = json::array();
 
     for (const auto& send : track.sends)
-        sends.push_back (json { { "levelDb", send.levelDb }, { "target", send.targetId } });
+        sends.push_back (json { { "levelDb", send.levelDb }, { "pre", send.preFader }, { "target", send.targetId } });
 
     trackJson["sends"] = std::move (sends);
     json effects = json::array();

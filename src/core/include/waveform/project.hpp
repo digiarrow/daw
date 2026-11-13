@@ -119,6 +119,7 @@ struct Send
 {
     std::string targetId = "master";
     double levelDb = -96.0;
+    bool preFader = false; ///< Post-fader follows the channel fader. Pre-fader does not.
 };
 
 struct SamplerZone
@@ -180,6 +181,7 @@ struct Track
     std::string name;
     TrackType type = TrackType::Audio;
     bool group = false;
+    bool returns = false; ///< A return bus. Sends can target it, and it has its own fader.
     std::string outputId = "master";
     MixerState mixer;
     SynthPatch synth;

@@ -126,6 +126,7 @@ private:
     juce::TextButton addMidiTrackButton_ { "Add MIDI Track" };
     juce::TextButton addEffectButton_ { "Add effect" };
     juce::TextButton makeGroupButton_ { "Make Group" };
+    juce::TextButton addReturnButton_ { "Add Return" };
     juce::TextButton collectButton_ { "Collect" };
     juce::TextButton exportButton_ { "Export WAV" };
     juce::TextButton loadDemoButton_ { "Load Demo" };

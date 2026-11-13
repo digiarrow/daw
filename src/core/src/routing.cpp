@@ -64,8 +64,15 @@ void routeTracks (const float* const* trackLeft,
         add (destination, trackLeft[index], trackRight[index], route.gain * route.panLeft, route.gain * route.panRight);
 
         for (int send = 0; send < kMaxSends; ++send)
-            if (route.sendGain[send] > 0.0f)
-                add (route.sendBus[send], trackLeft[index], trackRight[index], route.sendGain[send], route.sendGain[send]);
+        {
+            if (! (route.sendGain[send] > 0.0f))
+                continue;
+
+            const float fader = route.sendPre[send] ? 1.0f : route.gain;
+            add (route.sendBus[send], trackLeft[index], trackRight[index],
+                 route.sendGain[send] * fader * route.panLeft,
+                 route.sendGain[send] * fader * route.panRight);
+        }
     }
 
     for (int index = 0; index < trackCount; ++index)

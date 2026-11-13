@@ -73,6 +73,7 @@ struct RenderTrack
     int outputBus = 0;
     int sendBus[kMaxSends] { -1, -1 };
     float sendGain[kMaxSends] { 0.0f, 0.0f };
+    bool sendPre[kMaxSends] { false, false };
     EffectSlot effects[kMaxInserts] {};
     int effectCount = 0;
     std::vector<RackChain> chains;

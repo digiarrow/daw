@@ -64,6 +64,32 @@ TEST_CASE ("a group bus reaches the master and a direct track does too", "[routi
     REQUIRE (groupL[0] == Catch::Approx (0.5f).margin (1.0e-4));
 }
 
+TEST_CASE ("post-fader sends follow the channel fader and pre-fader sends do not", "[routing]")
+{
+    constexpr int kFrames = 4;
+    float dryL[kFrames], dryR[kFrames];
+    std::fill (dryL, dryL + kFrames, 1.0f);
+    std::fill (dryR, dryR + kFrames, 1.0f);
+    const float* lefts[] = { dryL };
+    const float* rights[] = { dryR };
+    float masterL[kFrames], masterR[kFrames], returnL[kFrames], returnR[kFrames];
+    float* busL[] = { masterL, returnL };
+    float* busR[] = { masterR, returnR };
+    waveform::RouteEndpoint route {};
+    route.outputBus = 0;
+    route.gain = 0.5f;
+    route.panLeft = 1.0f;
+    route.panRight = 1.0f;
+    route.sendBus[0] = 1;
+    route.sendGain[0] = 1.0f;
+    route.sendPre[0] = false;
+    waveform::routeTracks (lefts, rights, &route, 1, busL, busR, 2, kFrames);
+    REQUIRE (returnL[0] == Catch::Approx (0.5f).margin (1.0e-4));
+    route.sendPre[0] = true;
+    waveform::routeTracks (lefts, rights, &route, 1, busL, busR, 2, kFrames);
+    REQUIRE (returnL[0] == Catch::Approx (1.0f).margin (1.0e-4));
+}
+
 TEST_CASE ("an external delay line can hold a one second repeat", "[effects]")
 {
     constexpr int kRate = 48000;

@@ -151,7 +151,7 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.solo = track.mixer.solo;
 
         rendered.isMidi = track.type == TrackType::Midi;
-        rendered.group = track.group;
+        rendered.group = track.group || track.returns;
         rendered.patch = track.synth;
         rendered.effectCount = static_cast<int> (std::min<std::size_t> (track.effects.size(), static_cast<std::size_t> (kMaxInserts)));
 
@@ -368,7 +368,10 @@ GraphBuildResult buildGraph (const Project& project,
         ids.push_back (track.id);
 
     auto findBus = [&] (const std::string& id) {
-        if (id.empty() || id == "master")
+        if (id.empty() || id == "none")
+            return -1;
+
+        if (id == "master")
             return 0;
 
         for (std::size_t index = 0; index < ids.size() && index < graph->tracks.size(); ++index)
@@ -390,6 +393,7 @@ GraphBuildResult buildGraph (const Project& project,
         {
             rendered.sendBus[send] = findBus (source.sends[static_cast<std::size_t> (send)].targetId);
             rendered.sendGain[send] = dbToLinear (source.sends[static_cast<std::size_t> (send)].levelDb);
+            rendered.sendPre[send] = source.sends[static_cast<std::size_t> (send)].preFader;
         }
     }
 
@@ -655,6 +659,8 @@ void renderLinearBlock (const RenderGraph* graph,
             endpoints[index].sendBus[1] = source.sendBus[1];
             endpoints[index].sendGain[0] = source.sendGain[0];
             endpoints[index].sendGain[1] = source.sendGain[1];
+            endpoints[index].sendPre[0] = source.sendPre[0];
+            endpoints[index].sendPre[1] = source.sendPre[1];
             busCount = std::max (busCount, source.outputBus + 1);
         }
 

@@ -904,6 +904,41 @@ void SetSendCommand::revert (Project& project)
 
 const char* SetSendCommand::name() const { return "Set Send"; }
 
+SetReturnCommand::SetReturnCommand (std::string trackId, bool isReturn)
+    : trackId_ (std::move (trackId)), next_ (isReturn)
+{
+}
+
+void SetReturnCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previousReturn_ = track->returns;
+    previousGroup_ = track->group;
+    track->returns = next_;
+
+    if (next_)
+        track->group = true;
+}
+
+void SetReturnCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+    {
+        track->returns = previousReturn_;
+        track->group = previousGroup_;
+    }
+}
+
+const char* SetReturnCommand::name() const { return "Return Track"; }
+
 SetGroupCommand::SetGroupCommand (std::string trackId, bool group)
     : trackId_ (std::move (trackId)), next_ (group)
 {
