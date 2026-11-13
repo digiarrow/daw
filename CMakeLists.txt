@@ -107,6 +107,7 @@ endif()
 
 add_library(waveform_core STATIC
     src/core/src/automation.cpp
+    src/core/src/collect.cpp
     src/core/src/commands.cpp
     src/core/src/sampler.cpp
     src/core/src/effects.cpp

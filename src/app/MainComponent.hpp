@@ -72,6 +72,8 @@ private:
     void commitNotes (std::vector<waveform::MidiNote> notes);
     void record();
     void commitTake();
+    void collectProject();
+    void exportWav();
 
     [[nodiscard]] std::filesystem::path projectPath() const;
     [[nodiscard]] waveform::Track* selectedTrack();
@@ -103,6 +105,8 @@ private:
     juce::TextButton addMidiTrackButton_ { "Add MIDI Track" };
     juce::TextButton addDelayButton_ { "Add Delay" };
     juce::TextButton makeGroupButton_ { "Make Group" };
+    juce::TextButton collectButton_ { "Collect" };
+    juce::TextButton exportButton_ { "Export WAV" };
     juce::TextButton loadDemoButton_ { "Load Demo" };
     juce::TextButton openButton_ { "Open" };
     juce::TextButton saveButton_ { "Save" };

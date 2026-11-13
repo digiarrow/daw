@@ -144,7 +144,8 @@ The device backend is ALSA.
 6. The timeline under the transport shows every clip. Drag a clip to move it (it snaps to 16ths). Drag the copper marks in the ruler to set the loop. Click the ruler to seek. Double-click an empty MIDI lane to create a clip, then edit it in the piano roll below.
 7. Choose a MIDI input. Arm a MIDI track with **R**, press **Record**, and play the keyboard after the count-in. Stop, and the take becomes a clip you can quantize or redraw. Arm an audio track the same way to record the device input. The app opens the default input as well as the output; pick another input from **Audio Device** if the take is silent.
 8. **Save** writes a JSON project. Paths inside the project folder are stored relative to that file.
-9. Undo and redo cover tempo, tracks, clips, mixer moves, clip drags, and piano-roll edits. Ctrl+Z / Cmd+Z and Ctrl+Shift+Z / Cmd+Shift+Z are wired.
+9. **Collect** copies used audio into a `Media` folder next to the project. **Export WAV** writes an 8 second bounce beside the project file.
+10. Undo and redo cover tempo, tracks, clips, mixer moves, clip drags, and piano-roll edits. Ctrl+Z / Cmd+Z and Ctrl+Shift+Z / Cmd+Shift+Z are wired.
 
 Change the sample rate or buffer from the combo boxes or the device window. Clips are resampled to the new rate on the message thread before the callback sees them.
 

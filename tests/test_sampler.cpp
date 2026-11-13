@@ -1,5 +1,9 @@
 #include "waveform/automation.hpp"
+#include "waveform/collect.hpp"
+#include "waveform/paths.hpp"
 #include "waveform/sampler.hpp"
+
+#include <fstream>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -58,4 +62,36 @@ TEST_CASE ("sampler plays the root sample and stays quiet for an unmapped note",
     std::fill (left.begin(), left.end(), 0.0f);
     waveform::renderSamplerNotes (&note, 1, &zone, 1, 64, 48000.0, patch, 1.0f, 1.0f, left.data(), right.data());
     REQUIRE (left[32] == Catch::Approx (0.0f).margin (1.0e-4));
+}
+
+TEST_CASE ("collect copies media next to the project and rewrites the path", "[collect]")
+{
+    const auto root = std::filesystem::temp_directory_path() / "waveform-collect-test";
+    std::filesystem::remove_all (root);
+    std::filesystem::create_directories (root / "elsewhere");
+    const auto source = root / "elsewhere" / "tone.wav";
+    const auto projectFile = root / "song.json";
+    {
+        std::ofstream stream (source, std::ios::binary);
+        stream << "RIFF";
+        std::ofstream projectStream (projectFile);
+        projectStream << "{}";
+    }
+
+    waveform::Project project;
+    waveform::Track track;
+    track.type = waveform::TrackType::Audio;
+    waveform::AudioClip clip;
+    clip.file = waveform::pathToUtf8 (source);
+    clip.lengthSeconds = 1.0;
+    track.clips.emplace_back (clip);
+    project.tracks.push_back (std::move (track));
+
+    const auto result = waveform::collectMedia (project, projectFile);
+    REQUIRE (result.copied == 1);
+    REQUIRE (result.missing.empty());
+    const auto stored = std::get<waveform::AudioClip> (project.tracks[0].clips[0]).file;
+    REQUIRE (stored == "Media/tone.wav");
+    REQUIRE (std::filesystem::exists (root / "Media" / "tone.wav"));
+    std::filesystem::remove_all (root);
 }

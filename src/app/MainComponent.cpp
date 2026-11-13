@@ -1,6 +1,7 @@
 #include "MainComponent.hpp"
 
 #include "OfflineRenderer.hpp"
+#include "waveform/collect.hpp"
 #include "StudioLookAndFeel.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/serialize.hpp"
@@ -333,6 +334,8 @@ MainComponent::MainComponent()
     loadDemoButton_.onClick = [this] { loadDemo(); };
     openButton_.onClick = [this] { chooseProjectOpen(); };
     saveButton_.onClick = [this] { chooseProjectSave(); };
+    collectButton_.onClick = [this] { collectProject(); };
+    exportButton_.onClick = [this] { exportWav(); };
 
     sampleRateBox_.onChange = [this]
     {
@@ -363,7 +366,7 @@ MainComponent::MainComponent()
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
              &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
-             &loadDemoButton_, &openButton_, &saveButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
+             &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
              &countInBox_, &midiInputBox_, &arrangement_, &pianoRoll_, &trackViewport_ })
     {
@@ -491,6 +494,10 @@ void MainComponent::resized()
     addDelayButton_.setBounds (trackHeader.removeFromLeft (90));
     trackHeader.removeFromLeft (6);
     makeGroupButton_.setBounds (trackHeader.removeFromLeft (100));
+    exportButton_.setBounds (trackHeader.removeFromRight (96));
+    trackHeader.removeFromRight (6);
+    collectButton_.setBounds (trackHeader.removeFromRight (80));
+    trackHeader.removeFromRight (6);
     saveButton_.setBounds (trackHeader.removeFromRight (72));
     trackHeader.removeFromRight (6);
     openButton_.setBounds (trackHeader.removeFromRight (72));
@@ -1267,6 +1274,38 @@ void MainComponent::commitTake()
     rebuildTracks();
     refreshHistoryButtons();
     setStatus ("Saved the audio take.");
+}
+
+void MainComponent::collectProject()
+{
+    if (! projectFile_.existsAsFile())
+    {
+        setStatus ("Save the project before collecting media.");
+        return;
+    }
+
+    const auto result = waveform::collectMedia (project_, waveform::pathFromUtf8 (projectFile_.getFullPathName().toStdString()));
+    saveProject (projectFile_);
+    setStatus ("Collected " + juce::String (result.copied) + " file(s) into Media. Missing: " + juce::String (static_cast<int> (result.missing.size())));
+}
+
+void MainComponent::exportWav()
+{
+    if (! projectFile_.existsAsFile())
+    {
+        setStatus ("Save the project before exporting.");
+        return;
+    }
+
+    const auto destination = projectFile_.getParentDirectory().getChildFile (projectFile_.getFileNameWithoutExtension() + ".wav");
+    waveform::OfflineRenderRequest request;
+    request.projectPath = projectFile_.getFullPathName().toStdString();
+    request.outputPath = destination.getFullPathName().toStdString();
+    request.seconds = 8.0;
+    request.sampleRate = engine_.currentSampleRate() > 0.0 ? engine_.currentSampleRate() : 48000.0;
+    request.metronome = metronomeButton_.getToggleState();
+    const auto rendered = waveform::renderProjectFile (request);
+    setStatus (rendered.ok ? "Exported " + destination.getFileName() : juce::String (rendered.message));
 }
 
 void MainComponent::showDeviceSettings()

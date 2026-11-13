@@ -19,7 +19,7 @@ Status values: done, partial, skipped.
 - [partial] Simple sampler. Zones play from a file at the right pitch. Load a zone by putting it in the project; the engine renders it instead of the synth when `instrument` is `sampler`.
 - [partial] Automation lanes. `mixer.gainDb` is applied per block. Other parameters are stored and round-trip.
 - [partial] Session launch timing. `nextLaunchQuarter` snaps to the beat or the bar. The clip grid UI is not in the window yet.
-- [ ] Browser, save-and-collect, WAV export button (offline render already exists).
+- [partial] Browser, save-and-collect, WAV export. **Collect** copies clip and sampler files into `Media/` and rewrites paths. **Export WAV** bounces the saved project (8 seconds, current sample rate). A dedicated file browser pane is not in the window yet.
 
 ## Phase 2
 
