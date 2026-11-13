@@ -1617,8 +1617,8 @@ void MainComponent::restoreAutosave()
 void MainComponent::saveProject (const juce::File& file)
 {
     for (int index = 0; index < static_cast<int> (project_.tracks.size()); ++index)
-        if (! project_.tracks[static_cast<std::size_t> (index)].pluginIdentifier.empty())
-            project_.tracks[static_cast<std::size_t> (index)].pluginState = engine_.plugins().stateBase64 (index).toStdString();
+        for (int slot = 0; slot < static_cast<int> (project_.tracks[static_cast<std::size_t> (index)].plugins.size()); ++slot)
+            project_.tracks[static_cast<std::size_t> (index)].plugins[static_cast<std::size_t> (slot)].state = engine_.plugins().stateBase64 (index, slot).toStdString();
 
     auto copy = project_;
     const auto destination = waveform::pathFromUtf8 (file.getFullPathName().toStdString());
@@ -2060,42 +2060,48 @@ void MainComponent::syncPlugins()
     const double rate = engine_.currentSampleRate() > 0.0 ? engine_.currentSampleRate() : 48000.0;
     const int block = std::max (64, engine_.playbackInfo().bufferSize);
     const int count = std::min (static_cast<int> (project_.tracks.size()), waveform::PluginHost::kTracks);
+    const std::vector<waveform::PluginInsert> noPlugins;
 
     for (int index = 0; index < waveform::PluginHost::kTracks; ++index)
     {
-        const auto wanted = index < count ? project_.tracks[static_cast<std::size_t> (index)].pluginIdentifier : std::string {};
+        const auto& inserts = index < count ? project_.tracks[static_cast<std::size_t> (index)].plugins : noPlugins;
 
-        if (wanted == engine_.plugins().identifier (index).toStdString())
-            continue;
-
-        if (wanted.empty())
+        for (int slot = 0; slot < waveform::PluginHost::kSlots; ++slot)
         {
-            engine_.plugins().clear (index);
-            continue;
+            const auto wanted = slot < static_cast<int> (inserts.size()) ? inserts[static_cast<std::size_t> (slot)].identifier : std::string {};
+
+            if (wanted == engine_.plugins().identifier (index, slot).toStdString())
+                continue;
+
+            if (wanted.empty())
+            {
+                engine_.plugins().clear (index, slot);
+                continue;
+            }
+
+            const juce::PluginDescription* description = nullptr;
+
+            for (const auto& candidate : scannedPlugins_)
+                if (candidate.createIdentifierString().toStdString() == wanted)
+                    description = &candidate;
+
+            if (description == nullptr)
+            {
+                setStatus ("Scan VST3 to restore " + juce::String (inserts[static_cast<std::size_t> (slot)].name) + ".");
+                continue;
+            }
+
+            const auto error = engine_.plugins().load (index, slot, *description, rate, block);
+
+            if (error.isNotEmpty())
+                setStatus (error);
+            else
+                engine_.plugins().restoreState (index, slot, inserts[static_cast<std::size_t> (slot)].state);
         }
-
-        const juce::PluginDescription* description = nullptr;
-
-        for (const auto& candidate : scannedPlugins_)
-            if (candidate.createIdentifierString().toStdString() == wanted)
-                description = &candidate;
-
-        if (description == nullptr)
-        {
-            setStatus ("Scan VST3 to restore " + juce::String (project_.tracks[static_cast<std::size_t> (index)].pluginName) + ".");
-            continue;
-        }
-
-        const auto error = engine_.plugins().load (index, *description, rate, block);
-
-        if (error.isNotEmpty())
-            setStatus (error);
-        else
-            engine_.plugins().restoreState (index, project_.tracks[static_cast<std::size_t> (index)].pluginState);
     }
 }
 
-void MainComponent::openPluginEditor()
+void MainComponent::openPluginEditor (int slot)
 {
     int index = -1;
 
@@ -2103,7 +2109,7 @@ void MainComponent::openPluginEditor()
         if (project_.tracks[i].id == selectedTrackId_)
             index = static_cast<int> (i);
 
-    auto* instance = index >= 0 ? engine_.plugins().instance (index) : nullptr;
+    auto* instance = index >= 0 ? engine_.plugins().instance (index, slot) : nullptr;
 
     if (instance == nullptr)
     {
@@ -2119,8 +2125,25 @@ void MainComponent::showPluginMenu()
 {
     juce::PopupMenu menu;
     menu.addItem (1, "Scan VST3");
-    menu.addItem (2, "Open editor");
-    menu.addItem (3, "Remove plug-in");
+    juce::PopupMenu openMenu;
+    juce::PopupMenu removeMenu;
+    juce::PopupMenu moveMenu;
+    const waveform::Track* selected = selectedTrack();
+
+    if (selected != nullptr)
+    {
+        for (int slot = 0; slot < static_cast<int> (selected->plugins.size()); ++slot)
+        {
+            const auto label = juce::String (slot + 1) + "  " + selected->plugins[static_cast<std::size_t> (slot)].name;
+            openMenu.addItem (200 + slot, label);
+            removeMenu.addItem (300 + slot, label);
+            moveMenu.addItem (400 + slot, label);
+        }
+    }
+
+    menu.addSubMenu ("Open editor", openMenu);
+    menu.addSubMenu ("Remove", removeMenu);
+    menu.addSubMenu ("Move earlier", moveMenu);
 
     if (! scannedPlugins_.empty())
         menu.addSeparator();
@@ -2146,23 +2169,60 @@ void MainComponent::showPluginMenu()
                                 return;
                             }
 
-                            if (result == 2)
+                            if (result >= 200 && result < 300)
                             {
-                                openPluginEditor();
+                                openPluginEditor (result - 200);
                                 return;
                             }
 
-                            if (result == 3)
+                            if (result >= 300 && result < 400)
                             {
-                                if (selectedTrackId_.empty())
+                                auto* track = selectedTrack();
+
+                                if (track == nullptr)
+                                    return;
+
+                                auto plugins = track->plugins;
+                                const int slot = result - 300;
+
+                                if (slot < 0 || slot >= static_cast<int> (plugins.size()))
                                     return;
 
                                 pluginWindow_.reset();
-                                auto command = std::make_unique<waveform::SetPluginCommand> (selectedTrackId_, std::string(), std::string(), std::string());
-                                history_.execute (project_, std::move (command));
+                                plugins.erase (plugins.begin() + slot);
+                                history_.execute (project_, std::make_unique<waveform::SetPluginsCommand> (track->id, std::move (plugins)));
                                 syncPlugins();
                                 refreshHistoryButtons();
                                 setStatus ("Plug-in removed.");
+                                return;
+                            }
+
+                            if (result >= 400 && result < 500)
+                            {
+                                auto* track = selectedTrack();
+
+                                if (track == nullptr)
+                                    return;
+
+                                const int slot = result - 400;
+
+                                if (slot <= 0 || slot >= static_cast<int> (track->plugins.size()))
+                                    return;
+
+                                auto plugins = track->plugins;
+                                std::swap (plugins[static_cast<std::size_t> (slot)], plugins[static_cast<std::size_t> (slot - 1)]);
+                                int index = -1;
+
+                                for (std::size_t i = 0; i < project_.tracks.size(); ++i)
+                                    if (project_.tracks[i].id == track->id)
+                                        index = static_cast<int> (i);
+
+                                if (index >= 0)
+                                    engine_.plugins().swapSlots (index, slot, slot - 1);
+
+                                history_.execute (project_, std::make_unique<waveform::SetPluginsCommand> (track->id, std::move (plugins)));
+                                refreshHistoryButtons();
+                                setStatus ("Plug-in moved earlier.");
                                 return;
                             }
 
@@ -2183,8 +2243,17 @@ void MainComponent::showPluginMenu()
                             if (index < 0)
                                 return;
 
+                            auto plugins = project_.tracks[static_cast<std::size_t> (index)].plugins;
+
+                            if (static_cast<int> (plugins.size()) >= waveform::PluginHost::kSlots)
+                            {
+                                setStatus ("This track already has four plug-ins.");
+                                return;
+                            }
+
+                            const int slot = static_cast<int> (plugins.size());
                             pluginWindow_.reset();
-                            const auto error = engine_.plugins().load (index, description, rate, block);
+                            const auto error = engine_.plugins().load (index, slot, description, rate, block);
 
                             if (error.isNotEmpty())
                             {
@@ -2192,11 +2261,12 @@ void MainComponent::showPluginMenu()
                                 return;
                             }
 
-                            history_.execute (project_, std::make_unique<waveform::SetPluginCommand> (
-                                                            selectedTrackId_,
-                                                            description.createIdentifierString().toStdString(),
-                                                            description.name.toStdString(),
-                                                            engine_.plugins().stateBase64 (index).toStdString()));
+                            plugins.push_back (waveform::PluginInsert {
+                                description.createIdentifierString().toStdString(),
+                                description.name.toStdString(),
+                                engine_.plugins().stateBase64 (index, slot).toStdString()
+                            });
+                            history_.execute (project_, std::make_unique<waveform::SetPluginsCommand> (selectedTrackId_, std::move (plugins)));
                             refreshHistoryButtons();
                             const int latency = engine_.plugins().latency (index);
                             setStatus ("Loaded " + description.name + ". Latency " + juce::String (latency) + " samples, compensated on the other tracks.");

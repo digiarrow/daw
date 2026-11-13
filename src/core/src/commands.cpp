@@ -1004,6 +1004,47 @@ void SetPluginCommand::revert (Project& project)
 
 const char* SetPluginCommand::name() const { return "Plug-in"; }
 
+SetPluginsCommand::SetPluginsCommand (std::string trackId, std::vector<PluginInsert> plugins)
+    : trackId_ (std::move (trackId)), next_ (std::move (plugins))
+{
+}
+
+void SetPluginsCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->plugins;
+    track->plugins = next_;
+
+    if (! track->plugins.empty())
+    {
+        track->pluginIdentifier = track->plugins.front().identifier;
+        track->pluginName = track->plugins.front().name;
+        track->pluginState = track->plugins.front().state;
+    }
+    else
+    {
+        track->pluginIdentifier.clear();
+        track->pluginName.clear();
+        track->pluginState.clear();
+    }
+}
+
+void SetPluginsCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        track->plugins = previous_;
+}
+
+const char* SetPluginsCommand::name() const { return "Plug-ins"; }
+
 SetRackCommand::SetRackCommand (std::string trackId, DeviceRack rack)
     : trackId_ (std::move (trackId)), next_ (std::move (rack))
 {

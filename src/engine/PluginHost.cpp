@@ -8,6 +8,11 @@
 namespace waveform
 {
 
+int PluginHost::bindingIndex (int track, int slot) const noexcept
+{
+    return track * kSlots + slot;
+}
+
 PluginHost::PluginHost()
 {
     formats_.addFormat (std::make_unique<juce::VST3PluginFormat>());
@@ -19,7 +24,8 @@ PluginHost::PluginHost()
 PluginHost::~PluginHost()
 {
     for (int track = 0; track < kTracks; ++track)
-        publish (track, nullptr, {});
+        for (int slot = 0; slot < kSlots; ++slot)
+            publish (track, slot, nullptr, {});
 
     busy_.store (0, std::memory_order_release);
     reclaim();
@@ -71,16 +77,17 @@ void PluginHost::prepare (double sampleRate, int blockSize)
         cursorRight_[static_cast<std::size_t> (track)] = 0;
         appliedDelay_[static_cast<std::size_t> (track)] = 0;
 
-        if (auto* binding = bindings_[static_cast<std::size_t> (track)].load (std::memory_order_acquire))
-            if (binding->instance != nullptr)
-                binding->instance->prepareToPlay (sampleRate_, blockSize_);
+        for (int slot = 0; slot < kSlots; ++slot)
+            if (auto* binding = bindings_[static_cast<std::size_t> (bindingIndex (track, slot))].load (std::memory_order_acquire))
+                if (binding->instance != nullptr)
+                    binding->instance->prepareToPlay (sampleRate_, blockSize_);
     }
 }
 
-juce::String PluginHost::load (int track, const juce::PluginDescription& description, double sampleRate, int blockSize)
+juce::String PluginHost::load (int track, int slot, const juce::PluginDescription& description, double sampleRate, int blockSize)
 {
-    if (track < 0 || track >= kTracks)
-        return "Track index is out of range.";
+    if (track < 0 || track >= kTracks || slot < 0 || slot >= kSlots)
+        return "Plug-in slot is out of range.";
 
     juce::String error;
     auto instance = formats_.createPluginInstance (description,
@@ -93,29 +100,43 @@ juce::String PluginHost::load (int track, const juce::PluginDescription& descrip
 
     instance->enableAllBuses();
     instance->prepareToPlay (sampleRate > 0.0 ? sampleRate : sampleRate_, blockSize > 0 ? blockSize : blockSize_);
-    publish (track, std::move (instance), description.createIdentifierString());
+    publish (track, slot, std::move (instance), description.createIdentifierString());
     return {};
 }
 
-void PluginHost::clear (int track)
+void PluginHost::clear (int track, int slot)
 {
-    if (track >= 0 && track < kTracks)
-        publish (track, nullptr, {});
+    if (track >= 0 && track < kTracks && slot >= 0 && slot < kSlots)
+        publish (track, slot, nullptr, {});
 }
 
 void PluginHost::clearAll()
 {
     for (int track = 0; track < kTracks; ++track)
-        clear (track);
+        for (int slot = 0; slot < kSlots; ++slot)
+            clear (track, slot);
 }
 
-void PluginHost::publish (int track, std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& identifier)
+void PluginHost::swapSlots (int track, int first, int second)
+{
+    if (track < 0 || track >= kTracks || first < 0 || second < 0 || first >= kSlots || second >= kSlots || first == second)
+        return;
+
+    auto& left = bindings_[static_cast<std::size_t> (bindingIndex (track, first))];
+    auto& right = bindings_[static_cast<std::size_t> (bindingIndex (track, second))];
+    auto* leftBinding = left.load (std::memory_order_acquire);
+    auto* rightBinding = right.load (std::memory_order_acquire);
+    left.store (rightBinding, std::memory_order_release);
+    right.store (leftBinding, std::memory_order_release);
+}
+
+void PluginHost::publish (int track, int slot, std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& identifier)
 {
     auto* binding = new Binding;
     binding->instance = instance.release();
     binding->latency = binding->instance != nullptr ? std::max (0, binding->instance->getLatencySamples()) : 0;
     binding->identifier = identifier;
-    auto* previous = bindings_[static_cast<std::size_t> (track)].exchange (binding, std::memory_order_acq_rel);
+    auto* previous = bindings_[static_cast<std::size_t> (bindingIndex (track, slot))].exchange (binding, std::memory_order_acq_rel);
 
     if (previous != nullptr)
         retired_.push_back (previous);
@@ -123,21 +144,21 @@ void PluginHost::publish (int track, std::unique_ptr<juce::AudioPluginInstance> 
     reclaim();
 }
 
-juce::AudioPluginInstance* PluginHost::instance (int track) noexcept
+juce::AudioPluginInstance* PluginHost::instance (int track, int slot) noexcept
 {
-    if (track < 0 || track >= kTracks)
+    if (track < 0 || track >= kTracks || slot < 0 || slot >= kSlots)
         return nullptr;
 
-    auto* binding = bindings_[static_cast<std::size_t> (track)].load (std::memory_order_acquire);
+    auto* binding = bindings_[static_cast<std::size_t> (bindingIndex (track, slot))].load (std::memory_order_acquire);
     return binding != nullptr ? binding->instance : nullptr;
 }
 
-juce::String PluginHost::identifier (int track) const
+juce::String PluginHost::identifier (int track, int slot) const
 {
-    if (track < 0 || track >= kTracks)
+    if (track < 0 || track >= kTracks || slot < 0 || slot >= kSlots)
         return {};
 
-    auto* binding = bindings_[static_cast<std::size_t> (track)].load (std::memory_order_acquire);
+    auto* binding = bindings_[static_cast<std::size_t> (bindingIndex (track, slot))].load (std::memory_order_acquire);
     return binding != nullptr ? binding->identifier : juce::String();
 }
 
@@ -146,8 +167,13 @@ int PluginHost::latency (int track) const noexcept
     if (track < 0 || track >= kTracks)
         return 0;
 
-    auto* binding = bindings_[static_cast<std::size_t> (track)].load (std::memory_order_acquire);
-    return binding != nullptr ? binding->latency : 0;
+    int total = 0;
+
+    for (int slot = 0; slot < kSlots; ++slot)
+        if (auto* binding = bindings_[static_cast<std::size_t> (bindingIndex (track, slot))].load (std::memory_order_acquire))
+            total += binding->latency;
+
+    return total;
 }
 
 int PluginHost::maximumLatency() const noexcept
@@ -186,25 +212,30 @@ void PluginHost::processTrack (int track, float* left, float* right, int frames)
 
     int ownLatency = 0;
 
-    if (auto* binding = bindings_[static_cast<std::size_t> (track)].load (std::memory_order_acquire))
+    for (int slot = 0; slot < kSlots; ++slot)
     {
-        ownLatency = binding->latency;
+        auto* binding = bindings_[static_cast<std::size_t> (bindingIndex (track, slot))].load (std::memory_order_acquire);
 
-        if (binding->instance != nullptr)
-        {
-            const int channels = std::clamp (binding->instance->getTotalNumInputChannels(), 0, 2);
+        if (binding == nullptr)
+            continue;
 
-            if (channels > 0)
-            {
-                float* data[2] = { left, right };
-                juce::AudioBuffer<float> buffer (data, channels, frames);
-                juce::MidiBuffer midi;
-                binding->instance->processBlock (buffer, midi);
+        ownLatency += binding->latency;
 
-                if (channels == 1)
-                    std::copy (left, left + frames, right);
-            }
-        }
+        if (binding->instance == nullptr)
+            continue;
+
+        const int channels = std::clamp (binding->instance->getTotalNumInputChannels(), 0, 2);
+
+        if (channels <= 0)
+            continue;
+
+        float* data[2] = { left, right };
+        juce::AudioBuffer<float> buffer (data, channels, frames);
+        juce::MidiBuffer midi;
+        binding->instance->processBlock (buffer, midi);
+
+        if (channels == 1)
+            std::copy (left, left + frames, right);
     }
 
     const int delay = std::clamp (maxLatency_ - ownLatency, 0, kMaxDelay);
@@ -252,9 +283,9 @@ void PluginHost::reclaim() noexcept
     retired_.clear();
 }
 
-juce::String PluginHost::stateBase64 (int track) const
+juce::String PluginHost::stateBase64 (int track, int slot) const
 {
-    auto* plugin = const_cast<PluginHost*> (this)->instance (track);
+    auto* plugin = const_cast<PluginHost*> (this)->instance (track, slot);
 
     if (plugin == nullptr)
         return {};
@@ -264,9 +295,9 @@ juce::String PluginHost::stateBase64 (int track) const
     return block.isEmpty() ? juce::String() : juce::Base64::toBase64 (block.getData(), block.getSize());
 }
 
-void PluginHost::restoreState (int track, const juce::String& base64)
+void PluginHost::restoreState (int track, int slot, const juce::String& base64)
 {
-    auto* plugin = instance (track);
+    auto* plugin = instance (track, slot);
 
     if (plugin == nullptr || base64.isEmpty())
         return;

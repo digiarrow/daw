@@ -514,6 +514,21 @@ private:
     bool applied_ = false;
 };
 
+class SetPluginsCommand : public EditCommand
+{
+public:
+    SetPluginsCommand (std::string trackId, std::vector<PluginInsert> plugins);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::vector<PluginInsert> next_;
+    std::vector<PluginInsert> previous_;
+    bool applied_ = false;
+};
+
 class SetPluginCommand : public EditCommand
 {
 public:

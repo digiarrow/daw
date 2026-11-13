@@ -10,11 +10,12 @@
 namespace waveform
 {
 
-/// One VST3 insert per track. The audio thread only reads a published binding.
+/// Up to four VST3 inserts per track. The audio thread only reads published bindings.
 class PluginHost
 {
 public:
     static constexpr int kTracks = 64;
+    static constexpr int kSlots = 4;
     static constexpr int kMaxDelay = 16384;
 
     PluginHost();
@@ -29,13 +30,14 @@ public:
     /// Scans the platform's default VST3 folders. Message thread only.
     int scan();
 
-    /// Replaces the insert on `track`. Empty error string means success. Message thread only.
-    juce::String load (int track, const juce::PluginDescription& description, double sampleRate, int blockSize);
-    void clear (int track);
+    /// Replaces one insert slot. Empty error string means success. Message thread only.
+    juce::String load (int track, int slot, const juce::PluginDescription& description, double sampleRate, int blockSize);
+    void clear (int track, int slot);
     void clearAll();
+    void swapSlots (int track, int first, int second);
 
-    [[nodiscard]] juce::AudioPluginInstance* instance (int track) noexcept;
-    [[nodiscard]] juce::String identifier (int track) const;
+    [[nodiscard]] juce::AudioPluginInstance* instance (int track, int slot) noexcept;
+    [[nodiscard]] juce::String identifier (int track, int slot) const;
     [[nodiscard]] int latency (int track) const noexcept;
     [[nodiscard]] int maximumLatency() const noexcept;
 
@@ -48,8 +50,8 @@ public:
     void reclaim() noexcept;
     void setBusy (bool busy) noexcept { busy_.store (busy ? 1 : 0, std::memory_order_release); }
 
-    [[nodiscard]] juce::String stateBase64 (int track) const;
-    void restoreState (int track, const juce::String& base64);
+    [[nodiscard]] juce::String stateBase64 (int track, int slot) const;
+    void restoreState (int track, int slot, const juce::String& base64);
 
 private:
     struct Binding
@@ -59,11 +61,12 @@ private:
         juce::String identifier;
     };
 
-    void publish (int track, std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& identifier);
+    [[nodiscard]] int bindingIndex (int track, int slot) const noexcept;
+    void publish (int track, int slot, std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& identifier);
 
     juce::AudioPluginFormatManager formats_;
     juce::KnownPluginList known_;
-    std::array<std::atomic<Binding*>, kTracks> bindings_ {};
+    std::array<std::atomic<Binding*>, kTracks * kSlots> bindings_ {};
     std::vector<Binding*> retired_;
     std::atomic<int> busy_ { 0 };
     int maxLatency_ = 0;

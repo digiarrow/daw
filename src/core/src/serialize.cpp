@@ -93,6 +93,7 @@ MixerState mixerFromJson (const json& node)
 }
 
 json rackToJson (const DeviceRack& rack);
+json pluginsToJson (const std::vector<PluginInsert>& plugins);
 json warpToJson (const std::vector<WarpMarker>& markers);
 json takesToJson (const std::vector<ClipTake>& takes);
 json compToJson (const std::vector<CompSegment>& segments);
@@ -360,6 +361,18 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
         }
     }
 
+    if (node.contains ("plugins") && node.at ("plugins").is_array())
+    {
+        for (const auto& pluginNode : node.at ("plugins"))
+        {
+            PluginInsert plugin;
+            plugin.identifier = requireString (pluginNode, "identifier");
+            plugin.name = requireString (pluginNode, "name");
+            plugin.state = pluginNode.contains ("state") && pluginNode.at ("state").is_string() ? pluginNode.at ("state").get<std::string>() : std::string {};
+            track.plugins.push_back (std::move (plugin));
+        }
+    }
+
     if (node.contains ("plugin") && node.at ("plugin").is_string())
         track.pluginIdentifier = node.at ("plugin").get<std::string>();
 
@@ -368,6 +381,9 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
 
     if (node.contains ("pluginState") && node.at ("pluginState").is_string())
         track.pluginState = node.at ("pluginState").get<std::string>();
+
+    if (track.plugins.empty() && ! track.pluginIdentifier.empty())
+        track.plugins.push_back (PluginInsert { track.pluginIdentifier, track.pluginName, track.pluginState });
 
     if (track.type == TrackType::Midi && node.contains ("synth"))
         track.synth = synthFromJson (node.at ("synth"));
@@ -595,6 +611,16 @@ json effectSlotToJson (const EffectSlot& effect)
     };
 }
 
+json pluginsToJson (const std::vector<PluginInsert>& plugins)
+{
+    json values = json::array();
+
+    for (const auto& plugin : plugins)
+        values.push_back (json { { "identifier", plugin.identifier }, { "name", plugin.name }, { "state", plugin.state } });
+
+    return values;
+}
+
 json rackToJson (const DeviceRack& rack)
 {
     json chains = json::array();
@@ -649,9 +675,10 @@ json trackToJson (const Track& track)
         { "id", track.id },
         { "mixer", mixerToJson (track.mixer) },
         { "name", track.name },
-        { "plugin", track.pluginIdentifier },
-        { "pluginName", track.pluginName },
-        { "pluginState", track.pluginState },
+        { "plugin", track.plugins.empty() ? track.pluginIdentifier : track.plugins.front().identifier },
+        { "pluginName", track.plugins.empty() ? track.pluginName : track.plugins.front().name },
+        { "pluginState", track.plugins.empty() ? track.pluginState : track.plugins.front().state },
+        { "plugins", pluginsToJson (track.plugins) },
         { "session", std::move (session) },
         { "type", track.type == TrackType::Audio ? "audio" : "midi" }
     };

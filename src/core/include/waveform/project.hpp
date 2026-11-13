@@ -175,6 +175,13 @@ struct DeviceRack
     std::vector<DeviceMacro> macros;
 };
 
+struct PluginInsert
+{
+    std::string identifier;
+    std::string name;
+    std::string state;
+};
+
 struct Track
 {
     std::string id;
@@ -197,6 +204,7 @@ struct Track
     std::string pluginIdentifier;
     std::string pluginName;
     std::string pluginState;
+    std::vector<PluginInsert> plugins;
 };
 
 struct Project

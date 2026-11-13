@@ -88,7 +88,7 @@ private:
     void exportWav();
     void showPluginMenu();
     void syncPlugins();
-    void openPluginEditor();
+    void openPluginEditor (int slot = 0);
     void showScriptConsole();
     void showRackEditor();
     void showLfo();
