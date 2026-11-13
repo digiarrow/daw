@@ -2,6 +2,7 @@
 
 #include "waveform/mix.hpp"
 #include "waveform/paths.hpp"
+#include "waveform/synth.hpp"
 #include "waveform/timing.hpp"
 
 #include <algorithm>
@@ -36,6 +37,36 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.pan = static_cast<float> (track.mixer.pan);
         rendered.mute = track.mixer.mute;
         rendered.solo = track.mixer.solo;
+
+        rendered.isMidi = track.type == TrackType::Midi;
+        rendered.patch = track.synth;
+
+        if (track.type == TrackType::Midi)
+        {
+            for (const auto& clipValue : track.clips)
+            {
+                const auto* clip = std::get_if<MidiClip> (&clipValue);
+
+                if (clip == nullptr)
+                    continue;
+
+                RenderMidiClip renderedClip;
+                renderedClip.startQuarterNotes = clip->startQuarterNotes;
+                renderedClip.lengthQuarterNotes = clip->lengthQuarterNotes;
+
+                for (const auto& note : clip->notes)
+                {
+                    RenderMidiNote renderedNote;
+                    renderedNote.note = note.note;
+                    renderedNote.velocity = note.velocity;
+                    renderedNote.startQuarterNotes = note.startQuarterNotes;
+                    renderedNote.lengthQuarterNotes = note.lengthQuarterNotes;
+                    renderedClip.notes.push_back (renderedNote);
+                }
+
+                rendered.midiClips.push_back (std::move (renderedClip));
+            }
+        }
 
         if (track.type == TrackType::Audio && Timing::isValidSampleRate (sampleRate))
         {
@@ -90,7 +121,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         bool metronome,
                         bool testTone,
                         Oscillator* tone,
-                        std::atomic<int>* overflowCount) noexcept
+                        std::atomic<int>* overflowCount,
+                        SynthSchedule* synth) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -155,6 +187,70 @@ void renderLinearBlock (const RenderGraph* graph,
     mix.trackCount = trackCount;
     mix.masterGain = graph != nullptr ? graph->masterGain : 1.0f;
     mixBlock (mix, timelineStart, frames, left, right);
+
+    if (graph != nullptr && synth != nullptr && synth->memories != nullptr
+        && Timing::isValidSampleRate (sampleRate) && tempoBpm > 0.0)
+    {
+        bool anySolo = false;
+
+        for (const auto& track : graph->tracks)
+            if (track.solo)
+                anySolo = true;
+
+        const double blockStart = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
+        const double secondsPerQuarter = 60.0 / tempoBpm;
+        SoundingNote sounding[128];
+
+        for (int trackIndex = 0; trackIndex < static_cast<int> (graph->tracks.size()) && trackIndex < synth->memoryCount; ++trackIndex)
+        {
+            const auto& track = graph->tracks[static_cast<std::size_t> (trackIndex)];
+
+            if (! track.isMidi || track.mute || (anySolo && ! track.solo))
+                continue;
+
+            int count = 0;
+
+            for (const auto& clip : track.midiClips)
+            {
+                for (const auto& note : clip.notes)
+                {
+                    if (count >= 128)
+                    {
+                        overflow = true;
+                        break;
+                    }
+
+                    const double onsetQuarter = clip.startQuarterNotes + note.startQuarterNotes;
+                    const double onset = (onsetQuarter - blockStart) * secondsPerQuarter;
+                    const double release = onset + note.lengthQuarterNotes * secondsPerQuarter;
+
+                    if (release + track.patch.releaseSeconds < 0.0 || onset > static_cast<double> (frames) / sampleRate)
+                        continue;
+
+                    sounding[count].note = note.note;
+                    sounding[count].velocity = note.velocity;
+                    sounding[count].onsetSeconds = onset;
+                    sounding[count].releaseSeconds = release;
+                    ++count;
+                }
+            }
+
+            if (synth->liveTrack == trackIndex && synth->liveNotes != nullptr)
+            {
+                for (int live = 0; live < synth->liveNoteCount && count < 128; ++live)
+                    sounding[count++] = synth->liveNotes[live];
+            }
+
+            const PanGains pan = constantPowerPan (track.pan);
+            renderSynthNotes (sounding, count, frames, sampleRate, track.patch, synth->memories[trackIndex],
+                              track.gain * pan.left * graph->masterGain,
+                              track.gain * pan.right * graph->masterGain,
+                              left, right);
+        }
+    }
+
+    if (overflow && overflowCount != nullptr)
+        overflowCount->store (1, std::memory_order_relaxed);
 
     if (metronome)
         renderMetronome (left, right, timelineStart, frames, sampleRate, tempoBpm, signature, kMetronomeGain);

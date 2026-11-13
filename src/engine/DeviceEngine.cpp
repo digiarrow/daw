@@ -1,5 +1,9 @@
 #include "DeviceEngine.hpp"
 
+#include "waveform/midi.hpp"
+#include "waveform/mix.hpp"
+#include "waveform/timing.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -44,7 +48,11 @@ juce::String DeviceEngine::initialise()
     if (initialised_)
         return {};
 
-    const auto error = deviceManager_.initialiseWithDefaultDevices (0, 2);
+    auto error = deviceManager_.initialiseWithDefaultDevices (2, 2);
+
+    if (error.isNotEmpty())
+        error = deviceManager_.initialiseWithDefaultDevices (0, 2);
+
     deviceManager_.addAudioCallback (this);
     initialised_ = true;
     return error;
@@ -52,6 +60,12 @@ juce::String DeviceEngine::initialise()
 
 void DeviceEngine::shutdown()
 {
+    if (activeMidi_.isNotEmpty())
+    {
+        deviceManager_.removeMidiInputDeviceCallback (activeMidi_, this);
+        activeMidi_.clear();
+    }
+
     if (! initialised_)
     {
         shutdownGraphs();
@@ -137,6 +151,142 @@ bool DeviceEngine::setTestTone (bool enabled)
     return push (command);
 }
 
+bool DeviceEngine::seekQuarterNotes (double quarterNotes)
+{
+    const double rate = currentSampleRate() > 0.0 ? currentSampleRate() : 48000.0;
+    const double tempo = playbackInfo().tempoBpm;
+    EngineCommand command;
+    command.type = EngineCommandType::SeekSamples;
+    command.c = Timing::samplesFromQuarterNotes (quarterNotes, rate, tempo);
+    return push (command);
+}
+
+void DeviceEngine::setMidiInput (const juce::String& deviceIdentifier)
+{
+    if (activeMidi_.isNotEmpty())
+        deviceManager_.removeMidiInputDeviceCallback (activeMidi_, this);
+
+    activeMidi_.clear();
+
+    if (deviceIdentifier.isEmpty())
+        return;
+
+    deviceManager_.setMidiInputDeviceEnabled (deviceIdentifier, true);
+    deviceManager_.addMidiInputDeviceCallback (deviceIdentifier, this);
+    activeMidi_ = deviceIdentifier;
+}
+
+void DeviceEngine::setMonitorTrack (int trackIndex) noexcept
+{
+    monitorTrack_.store (trackIndex, std::memory_order_relaxed);
+}
+
+void DeviceEngine::prepareAudioCapture (double maxSeconds)
+{
+    const int rate = std::max (sampleRate_.load (std::memory_order_relaxed), 48000);
+    const int frames = static_cast<int> (std::clamp (maxSeconds, 1.0, 180.0) * rate);
+
+    if (static_cast<int> (recordLeft_.size()) < frames)
+    {
+        recordLeft_.assign (static_cast<std::size_t> (frames), 0.0f);
+        recordRight_.assign (static_cast<std::size_t> (frames), 0.0f);
+    }
+
+    recordCapacity_ = static_cast<int> (recordLeft_.size());
+}
+
+bool DeviceEngine::startRecording (int trackIndex, int countInBars, bool midi)
+{
+    if (deviceManager_.getCurrentAudioDevice() == nullptr || trackIndex < 0)
+        return false;
+
+    EngineCommand command;
+    command.type = EngineCommandType::StartRecord;
+    command.a = trackIndex;
+    command.b = std::clamp (countInBars, 0, 8);
+    command.c = midi ? 1 : 0;
+    return push (command);
+}
+
+int DeviceEngine::recordEpoch() const noexcept
+{
+    return recordEpoch_.load (std::memory_order_acquire);
+}
+
+MidiTake DeviceEngine::copyMidiTake() const
+{
+    MidiTake take;
+    take.trackIndex = publishedTrack_.load (std::memory_order_acquire);
+    take.startQuarterNotes = Transport::quarterNotesFromMicro (publishedStartMicro_.load (std::memory_order_acquire));
+    const int count = std::min (publishedMidiCount_.load (std::memory_order_acquire), kMaxRecordedNotes);
+
+    if (publishedMidi_.load (std::memory_order_acquire) == 0 || count <= 0)
+        return take;
+
+    for (int index = 0; index < count; ++index)
+    {
+        const auto& slot = midiSlots_[index];
+
+        if (slot.endMicro <= slot.startMicro)
+            continue;
+
+        MidiTakeNote note;
+        note.note = slot.note;
+        note.velocity = slot.velocity;
+        note.channel = slot.channel;
+        note.startQuarterNotes = Transport::quarterNotesFromMicro (slot.startMicro);
+        note.lengthQuarterNotes = Transport::quarterNotesFromMicro (slot.endMicro - slot.startMicro);
+        take.notes.push_back (note);
+    }
+
+    take.valid = ! take.notes.empty();
+    return take;
+}
+
+AudioTake DeviceEngine::copyAudioTake() const
+{
+    AudioTake take;
+
+    if (publishedMidi_.load (std::memory_order_acquire) != 0)
+        return take;
+
+    const int frames = std::min (publishedFrames_.load (std::memory_order_acquire), recordCapacity_);
+
+    if (frames <= 0)
+        return take;
+
+    take.valid = true;
+    take.trackIndex = publishedTrack_.load (std::memory_order_acquire);
+    take.startQuarterNotes = Transport::quarterNotesFromMicro (publishedStartMicro_.load (std::memory_order_acquire));
+    take.sampleRate = currentSampleRate() > 0.0 ? currentSampleRate() : 48000.0;
+    take.left.assign (recordLeft_.begin(), recordLeft_.begin() + frames);
+    take.right.assign (recordRight_.begin(), recordRight_.begin() + frames);
+    return take;
+}
+
+void DeviceEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
+{
+    IncomingMidi event;
+
+    if (message.isNoteOn())
+    {
+        event.note = static_cast<std::uint8_t> (message.getNoteNumber());
+        event.velocity = static_cast<std::uint8_t> (std::max (1, static_cast<int> (message.getVelocity())));
+    }
+    else if (message.isNoteOff())
+    {
+        event.note = static_cast<std::uint8_t> (message.getNoteNumber());
+        event.velocity = 0;
+    }
+    else
+    {
+        return;
+    }
+
+    event.channel = static_cast<std::uint8_t> (std::clamp (message.getChannel(), 1, 16));
+    midiQueue_.push (event);
+}
+
 void DeviceEngine::maintenance()
 {
     reclaimGraphs();
@@ -156,6 +306,9 @@ PlaybackInfo DeviceEngine::playbackInfo() const
     info.peakRight = loadFloat (peakRightBits_);
     info.metronome = metronomeFlag_.load (std::memory_order_relaxed) != 0;
     info.testTone = testToneFlag_.load (std::memory_order_relaxed) != 0;
+    info.recording = recordingFlag_.load (std::memory_order_relaxed) != 0;
+    info.countingIn = countingFlag_.load (std::memory_order_relaxed) != 0;
+    info.recordEpoch = recordEpoch_.load (std::memory_order_relaxed);
     info.deviceGeneration = deviceGeneration_.load (std::memory_order_relaxed);
     info.structureOverflow = structureOverflow_.load (std::memory_order_relaxed) != 0;
 
@@ -219,9 +372,197 @@ void DeviceEngine::drainCommands() noexcept
             case EngineCommandType::SetTestTone:
                 testToneEnabled_ = command.a != 0;
                 break;
+            case EngineCommandType::Stop:
+                transport_.apply (command);
+                finishRecording();
+                break;
+            case EngineCommandType::StartRecord:
+                if (! recording_ && ! countingIn_)
+                {
+                    recordTrack_ = command.a;
+                    recordMidi_ = command.c != 0;
+                    const int bars = std::clamp (command.b, 0, 8);
+                    const auto samples = countInSamples (bars, transport_.timeSignature(), transport_.sampleRate(), transport_.tempoBpm());
+
+                    if (samples > 0)
+                    {
+                        countingIn_ = true;
+                        countInRemaining_ = static_cast<int> (std::min<std::int64_t> (samples, 60 * 48000));
+                        countInElapsed_ = 0;
+                    }
+                    else
+                    {
+                        beginRecordingNow();
+                    }
+                }
+                break;
             default:
                 transport_.apply (command);
                 break;
+        }
+    }
+}
+
+void DeviceEngine::beginRecordingNow() noexcept
+{
+    recording_ = true;
+    countingIn_ = false;
+    recordStartQuarter_ = transport_.musicalPosition().quarterNotes;
+    recordWrite_ = 0;
+    midiCount_ = 0;
+
+    if (transport_.state() != TransportState::Playing)
+        transport_.play();
+
+    if (! recordMidi_)
+        return;
+
+    const int micro = static_cast<int> (Transport::quarterNotesToMicro (0.0));
+
+    for (int note = 0; note < 128; ++note)
+    {
+        auto& slot = live_[note];
+
+        if (! slot.down || slot.written || midiCount_ >= kMaxRecordedNotes)
+            continue;
+
+        auto& recorded = midiSlots_[midiCount_++];
+        recorded.note = note;
+        recorded.velocity = slot.velocity;
+        recorded.channel = 1;
+        recorded.startMicro = micro;
+        recorded.endMicro = -1;
+        slot.written = true;
+        slot.startMicro = micro;
+    }
+}
+
+void DeviceEngine::closeOpenMidiNotes() noexcept
+{
+    const int end = static_cast<int> (Transport::quarterNotesToMicro (transport_.musicalPosition().quarterNotes - recordStartQuarter_));
+
+    for (int index = 0; index < midiCount_; ++index)
+        if (midiSlots_[index].endMicro < 0)
+            midiSlots_[index].endMicro = std::max (midiSlots_[index].startMicro + 1, end);
+}
+
+void DeviceEngine::finishRecording() noexcept
+{
+    if (! recording_ && ! countingIn_)
+        return;
+
+    const bool captured = recording_;
+    countingIn_ = false;
+
+    if (recording_ && recordMidi_)
+        closeOpenMidiNotes();
+
+    recording_ = false;
+
+    if (! captured)
+        return;
+
+    publishedFrames_.store (recordWrite_, std::memory_order_relaxed);
+    publishedMidiCount_.store (midiCount_, std::memory_order_relaxed);
+    publishedStartMicro_.store (static_cast<std::int32_t> (Transport::quarterNotesToMicro (recordStartQuarter_)), std::memory_order_relaxed);
+    publishedTrack_.store (recordTrack_, std::memory_order_relaxed);
+    publishedMidi_.store (recordMidi_ ? 1 : 0, std::memory_order_relaxed);
+    recordEpoch_.fetch_add (1, std::memory_order_release);
+}
+
+void DeviceEngine::drainLiveMidi() noexcept
+{
+    const int micro = static_cast<int> (Transport::quarterNotesToMicro (transport_.musicalPosition().quarterNotes - recordStartQuarter_));
+    IncomingMidi event;
+
+    while (midiQueue_.pop (event))
+    {
+        if (event.note > 127)
+            continue;
+
+        auto& slot = live_[event.note];
+
+        if (event.velocity > 0)
+        {
+            slot.down = true;
+            slot.releasing = false;
+            slot.written = false;
+            slot.velocity = event.velocity;
+            slot.age = 0;
+            slot.releaseAge = 0;
+            slot.startMicro = micro;
+
+            if (recording_ && recordMidi_ && midiCount_ < kMaxRecordedNotes)
+            {
+                auto& recorded = midiSlots_[midiCount_++];
+                recorded.note = event.note;
+                recorded.velocity = event.velocity;
+                recorded.channel = event.channel == 0 ? 1 : event.channel;
+                recorded.startMicro = std::max (0, micro);
+                recorded.endMicro = -1;
+                slot.written = true;
+            }
+        }
+        else
+        {
+            slot.down = false;
+            slot.releasing = true;
+            slot.releaseAge = 0;
+
+            if (recording_ && recordMidi_ && slot.written)
+            {
+                for (int index = midiCount_ - 1; index >= 0; --index)
+                {
+                    if (midiSlots_[index].note == event.note && midiSlots_[index].endMicro < 0)
+                    {
+                        midiSlots_[index].endMicro = std::max (midiSlots_[index].startMicro + 1, micro);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+int DeviceEngine::collectLiveNotes (SoundingNote* destination, int capacity) const noexcept
+{
+    if (destination == nullptr || capacity <= 0 || ! (transport_.sampleRate() > 0.0))
+        return 0;
+
+    const double rate = transport_.sampleRate();
+    int count = 0;
+
+    for (int note = 0; note < 128 && count < capacity; ++note)
+    {
+        const auto& slot = live_[note];
+
+        if (! slot.down && ! slot.releasing)
+            continue;
+
+        destination[count].note = note;
+        destination[count].velocity = std::max (1, slot.velocity);
+        destination[count].onsetSeconds = -static_cast<double> (slot.age) / rate;
+        destination[count].releaseSeconds = slot.down ? 1.0e9 : -static_cast<double> (slot.releaseAge) / rate;
+        ++count;
+    }
+
+    return count;
+}
+
+void DeviceEngine::advanceLiveNotes (int frames) noexcept
+{
+    const int releaseLimit = static_cast<int> (std::lround (std::max (0.05, 0.2) * std::max (1.0, transport_.sampleRate())));
+
+    for (auto& slot : live_)
+    {
+        if (slot.down)
+            slot.age += frames;
+        else if (slot.releasing)
+        {
+            slot.releaseAge += frames;
+
+            if (slot.releaseAge > releaseLimit)
+                slot = {};
         }
     }
 }
@@ -235,6 +576,8 @@ void DeviceEngine::publishInfo() noexcept
     state_.store (static_cast<std::int32_t> (transport_.state()), std::memory_order_relaxed);
     metronomeFlag_.store (metronome_ ? 1 : 0, std::memory_order_relaxed);
     testToneFlag_.store (testToneEnabled_ ? 1 : 0, std::memory_order_relaxed);
+    recordingFlag_.store (recording_ ? 1 : 0, std::memory_order_relaxed);
+    countingFlag_.store (countingIn_ ? 1 : 0, std::memory_order_relaxed);
 
     if (transport_.sampleRate() > 0.0)
         sampleRate_.store (static_cast<int> (std::lround (transport_.sampleRate())), std::memory_order_relaxed);
@@ -350,35 +693,102 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
     }
 
     drainCommands();
+    drainLiveMidi();
 
     const bool directStereo = numOutputChannels >= 2 && outputChannelData[1] != nullptr;
     const int scratchFrames = static_cast<int> (scratchLeft_.size());
+    const int monitor = monitorTrack_.load (std::memory_order_relaxed);
+    SoundingNote liveNotes[128];
+    const int liveCount = collectLiveNotes (liveNotes, 128);
+    SynthSchedule schedule;
+    schedule.memories = synthMemory_.data();
+    schedule.memoryCount = static_cast<int> (synthMemory_.size());
+    schedule.liveNotes = nullptr;
+    schedule.liveNoteCount = 0;
+    schedule.liveTrack = -1;
 
-    auto renderFrames = [&] (int frames, float* left, float* right)
+    auto renderFrames = [&] (int frames, float* left, float* right, int inputOffset)
     {
         const double rate = transport_.sampleRate();
         const double tempo = transport_.tempoBpm();
         const auto signature = transport_.timeSignature();
+        int done = 0;
 
-        if (transport_.state() == TransportState::Playing)
+        auto monitorSynth = [&] (int offset, int count)
         {
-            int offset = 0;
-            transport_.advance (frames, [&] (std::int64_t start, int count)
+            if (graph == nullptr || monitor < 0 || monitor >= static_cast<int> (graph->tracks.size()) || liveCount <= 0)
+                return;
+
+            const auto& track = graph->tracks[static_cast<std::size_t> (monitor)];
+
+            if (! track.isMidi || track.mute)
+                return;
+
+            const PanGains pan = constantPowerPan (track.pan);
+            renderSynthNotes (liveNotes, liveCount, count, rate, track.patch, synthMemory_[static_cast<std::size_t> (monitor)],
+                              track.gain * pan.left * graph->masterGain,
+                              track.gain * pan.right * graph->masterGain,
+                              left + offset, right + offset);
+        };
+
+        if (countingIn_)
+        {
+            const int count = std::min (frames, std::max (0, countInRemaining_));
+            renderMetronome (left, right, countInElapsed_, count, rate, tempo, signature, 0.85f);
+            countInElapsed_ += count;
+            countInRemaining_ -= count;
+            done += count;
+
+            if (countInRemaining_ <= 0)
+                beginRecordingNow();
+        }
+
+        const int remain = frames - done;
+
+        if (remain > 0)
+        {
+            if (transport_.state() == TransportState::Playing)
             {
-                renderLinearBlock (graph, rate, tempo, signature, start, count,
-                                   left + offset, right + offset,
-                                   metronome_, false, nullptr, &structureOverflow_);
-                offset += count;
-            });
+                int offset = done;
+                transport_.advance (remain, [&] (std::int64_t start, int count)
+                {
+                    renderLinearBlock (graph, rate, tempo, signature, start, count,
+                                       left + offset, right + offset,
+                                       metronome_, false, nullptr, &structureOverflow_, &schedule);
+                    offset += count;
+                });
+            }
+            else
+            {
+                renderLinearBlock (nullptr, rate, tempo, signature, transport_.positionSamples(), remain,
+                                   left + done, right + done,
+                                   false, false, nullptr, nullptr, nullptr);
+            }
 
-            if (testToneEnabled_)
-                renderTestTone (left, right, frames, rate, 440.0, 0.15f, testTone_);
+            if (recording_ && ! recordMidi_ && recordWrite_ < recordCapacity_ && inputChannelData != nullptr && numInputChannels > 0)
+            {
+                const int space = recordCapacity_ - recordWrite_;
+                const int count = std::min (remain, space);
+                const float* inLeft = inputChannelData[0];
+                const float* inRight = numInputChannels > 1 ? inputChannelData[1] : inLeft;
+
+                if (inLeft != nullptr)
+                {
+                    for (int index = 0; index < count; ++index)
+                    {
+                        recordLeft_[static_cast<std::size_t> (recordWrite_ + index)] = inLeft[inputOffset + done + index];
+                        recordRight_[static_cast<std::size_t> (recordWrite_ + index)] = inRight != nullptr ? inRight[inputOffset + done + index] : inLeft[inputOffset + done + index];
+                    }
+
+                    recordWrite_ += count;
+                }
+            }
         }
-        else
-        {
-            renderLinearBlock (nullptr, rate, tempo, signature, transport_.positionSamples(), frames,
-                               left, right, false, testToneEnabled_, &testTone_, nullptr);
-        }
+
+        monitorSynth (0, frames);
+
+        if (testToneEnabled_)
+            renderTestTone (left, right, frames, rate, 440.0, 0.15f, testTone_);
 
         float peakLeft = 0.0f;
         float peakRight = 0.0f;
@@ -391,6 +801,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
             peakRight = std::max (peakRight, std::abs (right[index]));
         }
 
+        advanceLiveNotes (frames);
         return std::pair<float, float> (peakLeft, peakRight);
     };
 
@@ -423,7 +834,7 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
             right = scratchRight_.data();
         }
 
-        const auto peaks = renderFrames (frames, left, right);
+        const auto peaks = renderFrames (frames, left, right, rendered);
         peakLeft = std::max (peakLeft, peaks.first);
         peakRight = std::max (peakRight, peaks.second);
 

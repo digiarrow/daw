@@ -202,6 +202,53 @@ private:
     bool applied_ = false;
 };
 
+class SetMidiNotesCommand : public EditCommand
+{
+public:
+    SetMidiNotesCommand (std::string trackId, std::string clipId, std::vector<MidiNote> notes);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    std::vector<MidiNote> next_;
+    std::vector<MidiNote> previous_;
+    bool applied_ = false;
+};
+
+class MoveClipCommand : public EditCommand
+{
+public:
+    MoveClipCommand (std::string trackId, std::string clipId, double startQuarterNotes);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    double next_ = 0.0;
+    double previous_ = 0.0;
+    bool applied_ = false;
+};
+
+class SetSynthPatchCommand : public EditCommand
+{
+public:
+    SetSynthPatchCommand (std::string trackId, SynthPatch patch);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    SynthPatch next_ {};
+    SynthPatch previous_ {};
+    bool applied_ = false;
+};
+
 class RemoveClipCommand : public EditCommand
 {
 public:

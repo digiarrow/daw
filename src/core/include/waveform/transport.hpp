@@ -28,7 +28,8 @@ enum class EngineCommandType : std::uint8_t
     SetLoop,            ///< c = start micro-quarters, d = end micro-quarters
     SetLoopEnabled,     ///< a = 0 or 1
     SetMetronome,       ///< a = 0 or 1  (handled by the device, ignored by Transport)
-    SetTestTone         ///< a = 0 or 1  (handled by the device, ignored by Transport)
+    SetTestTone,        ///< a = 0 or 1  (handled by the device, ignored by Transport)
+    StartRecord         ///< a = track index, b = count-in bars, c = 1 for MIDI, 0 for audio
 };
 
 struct EngineCommand

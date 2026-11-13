@@ -3,6 +3,7 @@
 #include "RenderGraph.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/serialize.hpp"
+#include "waveform/synth.hpp"
 #include "waveform/timing.hpp"
 #include "waveform/transport.hpp"
 
@@ -80,6 +81,11 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
         return result;
     }
 
+    std::vector<SynthVoiceMemory> synthMemory (std::max<std::size_t> (1, built.graph->tracks.size()));
+    SynthSchedule schedule;
+    schedule.memories = synthMemory.data();
+    schedule.memoryCount = static_cast<int> (synthMemory.size());
+
     Transport transport;
     transport.setSampleRate (request.sampleRate);
     transport.setTempoBpm (project->tempoBpm);
@@ -135,7 +141,7 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
             renderLinearBlock (built.graph.get(), request.sampleRate, transport.tempoBpm(),
                                transport.timeSignature(), start, count,
                                left.data() + offset, right.data() + offset,
-                               request.metronome, false, nullptr, nullptr);
+                               request.metronome, false, nullptr, nullptr, &schedule);
             offset += count;
         });
 
@@ -184,6 +190,72 @@ OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request)
         result.message += " (" + built.warnings.front() + ")";
 
     return result;
+}
+
+bool writeStereoWav (const std::string& utf8Path,
+                     double sampleRate,
+                     const float* left,
+                     const float* right,
+                     std::int64_t frames,
+                     std::string& error)
+{
+    if (left == nullptr || frames <= 0 || ! Timing::isValidSampleRate (sampleRate))
+    {
+        error = "nothing to write";
+        return false;
+    }
+
+    const auto output = juce::File (juce::String::fromUTF8 (utf8Path.data(), static_cast<int> (std::min<std::size_t> (utf8Path.size(), 1 << 20))));
+    output.getParentDirectory().createDirectory();
+    output.deleteFile();
+    auto fileStream = std::make_unique<juce::FileOutputStream> (output);
+
+    if (fileStream->failedToOpen())
+    {
+        error = "could not open " + utf8Path;
+        return false;
+    }
+
+    std::unique_ptr<juce::OutputStream> stream (fileStream.release());
+    juce::WavAudioFormat format;
+    const auto options = juce::AudioFormatWriterOptions {}
+                             .withSampleRate (sampleRate)
+                             .withNumChannels (2)
+                             .withBitsPerSample (16)
+                             .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::integral);
+    auto writer = format.createWriterFor (stream, options);
+
+    if (writer == nullptr)
+    {
+        error = "could not create a WAV writer";
+        return false;
+    }
+
+    constexpr int kBlock = 1024;
+    juce::AudioBuffer<float> buffer (2, kBlock);
+    std::int64_t rendered = 0;
+
+    while (rendered < frames)
+    {
+        const int count = static_cast<int> (std::min<std::int64_t> (kBlock, frames - rendered));
+
+        for (int index = 0; index < count; ++index)
+        {
+            const auto source = static_cast<std::size_t> (rendered + index);
+            buffer.setSample (0, index, std::clamp (left[source], -1.0f, 1.0f));
+            buffer.setSample (1, index, std::clamp (right != nullptr ? right[source] : left[source], -1.0f, 1.0f));
+        }
+
+        if (! writer->writeFromAudioSampleBuffer (buffer, 0, count))
+        {
+            error = "failed while writing samples";
+            return false;
+        }
+
+        rendered += count;
+    }
+
+    return true;
 }
 
 } // namespace waveform

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "ArrangementView.hpp"
 #include "DeviceEngine.hpp"
+#include "PianoRoll.hpp"
 #include "waveform/commands.hpp"
 #include "waveform/project.hpp"
 
@@ -60,6 +62,16 @@ private:
     void loadDemo();
     void addTrack (waveform::TrackType type);
     void showDeviceSettings();
+    void refreshArrangement();
+    void refreshPiano();
+    void refreshMidiInputs();
+    void armTrack (const std::string& trackId);
+    void selectClip (const std::string& trackId, const std::string& clipId);
+    void moveClip (const std::string& trackId, const std::string& clipId, double startQuarterNotes);
+    void createMidiClip (const std::string& trackId, double startQuarterNotes);
+    void commitNotes (std::vector<waveform::MidiNote> notes);
+    void record();
+    void commitTake();
 
     [[nodiscard]] std::filesystem::path projectPath() const;
     [[nodiscard]] waveform::Track* selectedTrack();
@@ -82,6 +94,7 @@ private:
     juce::TextButton playButton_ { "Play" };
     juce::TextButton pauseButton_ { "Pause" };
     juce::TextButton stopButton_ { "Stop" };
+    juce::TextButton recordButton_ { "Record" };
     juce::TextButton deviceButton_ { "Audio Device" };
     juce::TextButton undoButton_ { "Undo" };
     juce::TextButton redoButton_ { "Redo" };
@@ -102,6 +115,11 @@ private:
     juce::ComboBox denominatorBox_;
     juce::ComboBox sampleRateBox_;
     juce::ComboBox bufferBox_;
+    juce::ComboBox countInBox_;
+    juce::ComboBox midiInputBox_;
+
+    ArrangementView arrangement_;
+    PianoRoll pianoRoll_;
 
     juce::Viewport trackViewport_;
     juce::Component trackList_;
@@ -115,6 +133,10 @@ private:
     juce::Rectangle<float> meterRightBounds_;
 
     std::string selectedTrackId_;
+    std::string selectedClipId_;
+    std::string armedTrackId_;
+    std::vector<juce::String> midiInputIds_;
+    int seenRecordEpoch_ = 0;
     bool updatingControls_ = false;
     bool draggingTempo_ = false;
     bool draggingMaster_ = false;

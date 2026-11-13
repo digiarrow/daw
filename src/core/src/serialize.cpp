@@ -77,6 +77,8 @@ json mixerToJson (const MixerState& mixer)
     };
 }
 
+SynthPatch synthFromJson (const json& node);
+
 MixerState mixerFromJson (const json& node)
 {
     requireObject (node, "mixer");
@@ -279,7 +281,66 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
     for (const auto& clip : node.at ("clips"))
         track.clips.push_back (clipFromJson (clip, track.type, ids));
 
+    if (track.type == TrackType::Midi && node.contains ("synth"))
+        track.synth = synthFromJson (node.at ("synth"));
+
     return track;
+}
+
+const char* waveName (OscillatorWave wave)
+{
+    switch (wave)
+    {
+        case OscillatorWave::Sine: return "sine";
+        case OscillatorWave::Square: return "square";
+        case OscillatorWave::Triangle: return "triangle";
+        case OscillatorWave::Saw: break;
+    }
+
+    return "saw";
+}
+
+OscillatorWave waveFromName (const std::string& name)
+{
+    if (name == "sine")
+        return OscillatorWave::Sine;
+
+    if (name == "square")
+        return OscillatorWave::Square;
+
+    if (name == "triangle")
+        return OscillatorWave::Triangle;
+
+    return OscillatorWave::Saw;
+}
+
+json synthToJson (const SynthPatch& patch)
+{
+    return json {
+        { "attack", patch.attackSeconds },
+        { "cutoffHz", patch.cutoffHz },
+        { "decay", patch.decaySeconds },
+        { "detuneCents", patch.detuneCents },
+        { "release", patch.releaseSeconds },
+        { "resonance", patch.resonance },
+        { "sustain", patch.sustain },
+        { "wave", waveName (patch.wave) }
+    };
+}
+
+SynthPatch synthFromJson (const json& node)
+{
+    requireObject (node, "synth");
+    SynthPatch patch;
+    patch.wave = waveFromName (requireString (node, "wave"));
+    patch.detuneCents = requireNumber (node, "detuneCents");
+    patch.cutoffHz = requireNumber (node, "cutoffHz");
+    patch.resonance = requireNumber (node, "resonance");
+    patch.attackSeconds = requireNumber (node, "attack");
+    patch.decaySeconds = requireNumber (node, "decay");
+    patch.sustain = requireNumber (node, "sustain");
+    patch.releaseSeconds = requireNumber (node, "release");
+    return patch;
 }
 
 json trackToJson (const Track& track)
@@ -289,13 +350,18 @@ json trackToJson (const Track& track)
     for (const auto& clip : track.clips)
         clips.push_back (clipToJson (clip));
 
-    return json {
+    json trackJson = {
         { "clips", std::move (clips) },
         { "id", track.id },
         { "mixer", mixerToJson (track.mixer) },
         { "name", track.name },
         { "type", track.type == TrackType::Audio ? "audio" : "midi" }
     };
+
+    if (track.type == TrackType::Midi)
+        trackJson["synth"] = synthToJson (track.synth);
+
+    return trackJson;
 }
 
 } // namespace
@@ -322,7 +388,8 @@ std::string projectToJson (const Project& project)
             { "numerator", project.timeSignature.numerator }
         } },
         { "tracks", std::move (tracks) },
-        { "version", kProjectFormatVersion }
+        { "version", kProjectFormatVersion },
+        { "countInBars", project.countInBars }
     };
 
     return document.dump (2) + '\n';
@@ -376,6 +443,9 @@ std::optional<Project> projectFromJson (std::string_view text, std::string* erro
 
         project.master.gainDb = requireNumber (requireObject (document.at ("master"), "master"), "gainDb");
         clampMixer (project.master);
+
+        if (document.contains ("countInBars"))
+            project.countInBars = std::clamp (requireInt (document, "countInBars"), 0, 8);
 
         if (! document.contains ("tracks") || ! document.at ("tracks").is_array())
             fail ("tracks must be an array");

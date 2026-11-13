@@ -47,6 +47,8 @@ Stop returns to sample 0. Pause holds the playhead. Play resumes.
 
 The metronome is a pure function of the timeline (a 20 ms sine, accented on bar downbeats), so it cannot drift from the clock. The 440 Hz test tone is free-running and sounds even when the transport is stopped, which is how you check the device before loading a file.
 
+A recording count-in does not move the arrangement playhead. The audio thread plays `countInBars` of metronome, then starts the transport at the current playhead and opens the take. `countInSamples` in the core is the length of that pre-roll.
+
 ## Document
 
 ```
@@ -54,11 +56,12 @@ Project
   tempo, meter, loop, master gain
   Track[]  (audio | midi)
     mixer: gain, pan, mute, solo
+    synth patch on MIDI tracks
     Clip    audio: file, start in quarter notes, offset/length in seconds
             midi:  start, length, notes
 ```
 
-Edits are `EditCommand` objects on `History` (apply / revert, bounded depth). The UI calls them for tempo, meter, loop, tracks, clips, and mixer moves. Transport play / stop is not an edit; it is a command to the audio thread only.
+Edits are `EditCommand` objects on `History` (apply / revert, bounded depth). The UI calls them for tempo, meter, loop, tracks, clips, mixer moves, clip drags, and piano-roll note lists. Transport play / stop is not an edit; it is a command to the audio thread only. A finished recording becomes an `AddMidiClipCommand` or `AddAudioClipCommand`, so the take itself is undoable.
 
 `waveform_core` is standard C++20. It does not link JUCE, which is why the timing and JSON tests do not need a device or a GUI. The engine adapts that model to JUCE's device and file APIs.
 
@@ -70,24 +73,27 @@ On load, the message thread decodes the file with JUCE and linearly resamples it
 
 Each block:
 
-1. Drain transport commands.
-2. If playing, advance the clock and mix each contiguous segment.
-3. Apply track gain, constant-power pan, mute, and solo (mute wins; any solo silences the rest).
-4. Apply master gain.
-5. Add metronome and test tone.
-6. Hard-clip to [-1, 1] and publish peaks.
+1. Drain transport commands and the MIDI input queue.
+2. If a count-in is running, play the metronome without moving the arrangement. When it finishes, start the transport and the take.
+3. If playing, advance the clock and mix each contiguous audio segment.
+4. Render MIDI clips through the built-in polysynth, then live notes on the monitored track. Phase comes from each note's onset, so it stays continuous across blocks. Filter state per pitch lives on the audio thread.
+5. Apply track gain, constant-power pan, mute, and solo (mute wins; any solo silences the rest), then master gain.
+6. Add the metronome and test tone.
+7. Hard-clip to [-1, 1] and publish peaks. If a take is open, copy audio input or append MIDI note-ons and note-offs. No allocation.
 
-`waveform-render` runs steps 2–6 without a device and writes a 16-bit WAV. The demo test uses it at 48 kHz (the file's rate) and 44.1 kHz (resampled).
+MIDI input arrives on JUCE's MIDI thread and is pushed into the same single-producer queue. The audio thread is the only consumer. While a take is armed it also appends note-ons and note-offs into a fixed array. Audio input is copied into a buffer the message thread allocated before the punch-in. Neither path allocates inside the callback.
+
+The arrangement view and piano roll are message-thread components. They read the project and the published playhead. They do not talk to the audio thread except through commands and `seekQuarterNotes`.
+
+`waveform-render` runs the same mix and synth without a device and writes a 16-bit WAV. The demo test uses it at 48 kHz (the file's rate) and 44.1 kHz (resampled).
 
 ## Where later work attaches
 
-**Arrangement view.** Clips already have ids and a start on the quarter-note grid. A timeline component draws those clips and seeks by posting `SeekSamples`. It should not grow a second clock.
+**Arrangement view.** Done in this slice. Clips draw from their start and length, drag through `MoveClipCommand`, and the ruler seeks with `SeekSamples`. The loop brace edits the same loop the transport already uses. Waveform peaks inside the clip rectangles are still missing; build them in `ClipLibrary` when a file is decoded.
 
-**Waveform peaks.** Build them in `ClipLibrary` when the file is decoded and store them beside `ClipAudio`. The audio thread never needs them.
+**Recording.** Audio input and MIDI input both record into the armed track. The message thread commits the take after `recordEpoch` advances. Punch-in starts at the current playhead once the count-in finishes.
 
-**Recording.** The callback already receives input pointers and ignores them. A record arm flag can append into a buffer the message thread installed before the take. Commit the take with `AddAudioClipCommand` when the transport stops.
-
-**MIDI and a piano roll.** `MidiClip` / `MidiNote` and `AddMidiNoteCommand` are the document side. A piano roll edits those commands. Playback needs a new voice object, called from `renderLinearBlock` after the audio clips, with a per-block note list built on the message thread or from a lock-free note queue. Phase 0 stores the notes and does not synthesise them. Soloing a MIDI track silences audio tracks, which is the mixer rule, and the track stays quiet until a voice exists.
+**MIDI and the piano roll.** Notes in a clip are replaced as one `SetMidiNotesCommand`, which covers draw, move, resize, delete, velocity, and quantize. The built-in synth is the instrument. It is not a sampler and it is not a hosted plug-in.
 
 **Mixer routing.** `RenderTrack` is one stereo sum into the master. A send is another gain into a bus id, and a bus is another `RenderTrack` processed after its sources. Keep the graph immutable and rebuilt when the routing changes.
 

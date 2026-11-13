@@ -467,4 +467,146 @@ void RemoveClipCommand::revert (Project& project)
 
 const char* RemoveClipCommand::name() const { return "Remove Clip"; }
 
+namespace
+{
+
+MidiClip* findMidiClip (Project& project, const std::string& trackId, const std::string& clip)
+{
+    auto* track = findTrack (project, trackId);
+
+    if (track == nullptr)
+        return nullptr;
+
+    for (auto& candidate : track->clips)
+        if (auto* midi = std::get_if<MidiClip> (&candidate); midi != nullptr && midi->id == clip)
+            return midi;
+
+    return nullptr;
+}
+
+double& clipStart (Clip& clip)
+{
+    if (auto* audio = std::get_if<AudioClip> (&clip))
+        return audio->startQuarterNotes;
+
+    return std::get<MidiClip> (clip).startQuarterNotes;
+}
+
+} // namespace
+
+SetMidiNotesCommand::SetMidiNotesCommand (std::string trackId, std::string clipId, std::vector<MidiNote> notes)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), next_ (std::move (notes))
+{
+    for (auto& note : next_)
+    {
+        note.note = std::clamp (note.note, 0, 127);
+        note.velocity = std::clamp (note.velocity, 1, 127);
+        note.channel = std::clamp (note.channel, 1, 16);
+        note.startQuarterNotes = std::max (0.0, note.startQuarterNotes);
+
+        if (! (note.lengthQuarterNotes > 0.0) || std::isnan (note.lengthQuarterNotes))
+            note.lengthQuarterNotes = 0.25;
+    }
+}
+
+void SetMidiNotesCommand::apply (Project& project)
+{
+    auto* clip = findMidiClip (project, trackId_, clipId_);
+    applied_ = clip != nullptr;
+
+    if (clip == nullptr)
+        return;
+
+    previous_ = clip->notes;
+    clip->notes = next_;
+}
+
+void SetMidiNotesCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* clip = findMidiClip (project, trackId_, clipId_))
+        clip->notes = previous_;
+}
+
+const char* SetMidiNotesCommand::name() const { return "Edit Notes"; }
+
+MoveClipCommand::MoveClipCommand (std::string trackId, std::string clipId, double startQuarterNotes)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), next_ (std::max (0.0, startQuarterNotes))
+{
+}
+
+void MoveClipCommand::apply (Project& project)
+{
+    applied_ = false;
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    for (auto& clip : track->clips)
+    {
+        if (clipId (clip) != clipId_)
+            continue;
+
+        previous_ = clipStart (clip);
+        clipStart (clip) = next_;
+        applied_ = true;
+        return;
+    }
+}
+
+void MoveClipCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    for (auto& clip : track->clips)
+        if (clipId (clip) == clipId_)
+            clipStart (clip) = previous_;
+}
+
+const char* MoveClipCommand::name() const { return "Move Clip"; }
+
+SetSynthPatchCommand::SetSynthPatchCommand (std::string trackId, SynthPatch patch)
+    : trackId_ (std::move (trackId)), next_ (patch)
+{
+    next_.detuneCents = std::clamp (next_.detuneCents, -50.0, 50.0);
+    next_.cutoffHz = std::clamp (next_.cutoffHz, 40.0, 16000.0);
+    next_.resonance = std::clamp (next_.resonance, 0.0, 0.9);
+    next_.attackSeconds = std::clamp (next_.attackSeconds, 0.0, 4.0);
+    next_.decaySeconds = std::clamp (next_.decaySeconds, 0.0, 4.0);
+    next_.sustain = std::clamp (next_.sustain, 0.0, 1.0);
+    next_.releaseSeconds = std::clamp (next_.releaseSeconds, 0.0, 8.0);
+}
+
+void SetSynthPatchCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr && track->type == TrackType::Midi;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->synth;
+    track->synth = next_;
+}
+
+void SetSynthPatchCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* track = findTrack (project, trackId_))
+        track->synth = previous_;
+}
+
+const char* SetSynthPatchCommand::name() const { return "Instrument"; }
+
 } // namespace waveform

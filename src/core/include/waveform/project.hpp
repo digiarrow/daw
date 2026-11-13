@@ -23,6 +23,27 @@ struct MixerState
     bool solo = false;
 };
 
+enum class OscillatorWave
+{
+    Sine,
+    Saw,
+    Square,
+    Triangle
+};
+
+/// Built-in instrument used by every MIDI track. Plug-in hosting can replace this later.
+struct SynthPatch
+{
+    OscillatorWave wave = OscillatorWave::Saw;
+    double detuneCents = 6.0;
+    double cutoffHz = 1800.0;
+    double resonance = 0.2;
+    double attackSeconds = 0.01;
+    double decaySeconds = 0.12;
+    double sustain = 0.7;
+    double releaseSeconds = 0.2;
+};
+
 /// Unwarped audio. The file plays at its natural speed.
 /// `startQuarterNotes` is where it sits on the timeline.
 /// `offsetSeconds` / `lengthSeconds` select a region of the source file.
@@ -65,6 +86,7 @@ struct Track
     std::string name;
     TrackType type = TrackType::Audio;
     MixerState mixer;
+    SynthPatch synth;
     std::vector<Clip> clips;
 };
 
@@ -76,6 +98,7 @@ struct Project
     bool loopEnabled = false;
     double loopStartQuarterNotes = 0.0;
     double loopEndQuarterNotes = 8.0;
+    int countInBars = 1;
     MixerState master; ///< Only gainDb is used. Pan, mute, and solo are ignored.
     std::vector<Track> tracks;
 

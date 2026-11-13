@@ -1,5 +1,6 @@
 #include "MainComponent.hpp"
 
+#include "OfflineRenderer.hpp"
 #include "StudioLookAndFeel.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/serialize.hpp"
@@ -267,6 +268,37 @@ MainComponent::MainComponent()
     playButton_.onClick = [this] { engine_.play(); };
     pauseButton_.onClick = [this] { engine_.pause(); };
     stopButton_.onClick = [this] { engine_.stop(); };
+    recordButton_.onClick = [this] { record(); };
+    countInBox_.addItem ("Count-in off", 1);
+    countInBox_.addItem ("1 bar", 2);
+    countInBox_.addItem ("2 bars", 3);
+    countInBox_.setSelectedId (2, juce::dontSendNotification);
+    countInBox_.onChange = [this]
+    {
+        project_.countInBars = std::max (0, countInBox_.getSelectedId() - 1);
+    };
+    midiInputBox_.onChange = [this]
+    {
+        if (updatingControls_)
+            return;
+
+        const int selected = midiInputBox_.getSelectedId();
+        const int index = selected - 2;
+        engine_.setMidiInput (index >= 0 && index < static_cast<int> (midiInputIds_.size()) ? midiInputIds_[static_cast<std::size_t> (index)] : juce::String());
+    };
+    arrangement_.onSelectClip = [this] (const std::string& trackId, const std::string& clipId) { selectClip (trackId, clipId); };
+    arrangement_.onArmTrack = [this] (const std::string& trackId) { armTrack (trackId); };
+    arrangement_.onMoveClip = [this] (const std::string& trackId, const std::string& clipId, double start) { moveClip (trackId, clipId, start); };
+    arrangement_.onCreateMidiClip = [this] (const std::string& trackId, double start) { createMidiClip (trackId, start); };
+    arrangement_.onSeek = [this] (double quarter) { engine_.seekQuarterNotes (quarter); };
+    arrangement_.onLoopEdit = [this] (bool enabled, double start, double end)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetLoopCommand> (enabled, start, end));
+        loopButton_.setToggleState (project_.loopEnabled, juce::dontSendNotification);
+        syncEngine();
+        refreshHistoryButtons();
+    };
+    pianoRoll_.onCommit = [this] (std::vector<waveform::MidiNote> notes) { commitNotes (std::move (notes)); };
     deviceButton_.onClick = [this] { showDeviceSettings(); };
     undoButton_.onClick = [this] { undo(); };
     redoButton_.onClick = [this] { redo(); };
@@ -304,11 +336,11 @@ MainComponent::MainComponent()
 
     for (auto* component : std::initializer_list<juce::Component*> {
              &titleLabel_, &deviceLabel_, &positionLabel_, &timeLabel_, &statusLabel_, &hintLabel_,
-             &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &deviceButton_,
+             &bpmCaption_, &masterCaption_, &playButton_, &pauseButton_, &stopButton_, &recordButton_, &deviceButton_,
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &trackViewport_ })
+             &countInBox_, &midiInputBox_, &arrangement_, &pianoRoll_, &trackViewport_ })
     {
         addAndMakeVisible (component);
         silenceFocus (*component);
@@ -331,10 +363,12 @@ MainComponent::MainComponent()
     if (deviceError.isNotEmpty())
         setStatus (deviceError);
     else
-        setStatus ("Output is open. Use the test tone, then add a WAV.");
+        setStatus ("Arm a track, then record. Double-click a MIDI lane to add a clip.");
 
+    refreshMidiInputs();
+    seenRecordEpoch_ = engine_.recordEpoch();
     startTimerHz (30);
-    setSize (1040, 720);
+    setSize (1100, 900);
     grabKeyboardFocus();
 }
 
@@ -376,13 +410,15 @@ void MainComponent::resized()
 
     transportBounds_ = area.removeFromTop (112);
     auto transport = transportBounds_.reduced (12, 10);
-    auto buttons = transport.removeFromLeft (250);
+    auto buttons = transport.removeFromLeft (340);
     auto buttonRow = buttons.removeFromTop (32);
     playButton_.setBounds (buttonRow.removeFromLeft (78).reduced (0, 2));
     buttonRow.removeFromLeft (6);
     pauseButton_.setBounds (buttonRow.removeFromLeft (78).reduced (0, 2));
     buttonRow.removeFromLeft (6);
     stopButton_.setBounds (buttonRow.removeFromLeft (78).reduced (0, 2));
+    buttonRow.removeFromLeft (6);
+    recordButton_.setBounds (buttonRow.removeFromLeft (78).reduced (0, 2));
     buttons.removeFromTop (8);
     auto signature = buttons.removeFromTop (28);
     numeratorBox_.setBounds (signature.removeFromLeft (64));
@@ -412,6 +448,10 @@ void MainComponent::resized()
     undoButton_.setBounds (deviceRow.removeFromLeft (72));
     deviceRow.removeFromLeft (6);
     redoButton_.setBounds (deviceRow.removeFromLeft (72));
+    deviceRow.removeFromLeft (8);
+    countInBox_.setBounds (deviceRow.removeFromLeft (110));
+    deviceRow.removeFromLeft (8);
+    midiInputBox_.setBounds (deviceRow.removeFromLeft (180));
 
     area.removeFromTop (8);
     auto trackHeader = area.removeFromTop (30);
@@ -431,6 +471,11 @@ void MainComponent::resized()
     area.removeFromTop (6);
     masterBounds_ = area.removeFromBottom (52);
     area.removeFromBottom (8);
+    pianoRoll_.setBounds (area.removeFromBottom (260));
+    area.removeFromBottom (8);
+    const int arrangementHeight = std::clamp (22 + static_cast<int> (project_.tracks.size()) * 32, 120, 240);
+    arrangement_.setBounds (area.removeFromTop (arrangementHeight));
+    area.removeFromTop (8);
     trackViewport_.setBounds (area);
 
     auto master = masterBounds_.reduced (12, 10);
@@ -457,8 +502,18 @@ void MainComponent::timerCallback()
     {
         seenDeviceGeneration_ = engine_.deviceGeneration();
         refreshDeviceControls();
+        refreshMidiInputs();
         syncEngine();
     }
+
+    if (engine_.recordEpoch() != seenRecordEpoch_)
+    {
+        seenRecordEpoch_ = engine_.recordEpoch();
+        commitTake();
+    }
+
+    refreshArrangement();
+    refreshPiano();
 }
 
 bool MainComponent::keyPressed (const juce::KeyPress& key)
@@ -961,6 +1016,228 @@ void MainComponent::addTrack (waveform::TrackType type)
     syncEngine();
     refreshHistoryButtons();
     setStatus ("Added " + juce::String (name));
+}
+
+void MainComponent::refreshArrangement()
+{
+    const auto info = engine_.playbackInfo();
+    const double rate = info.sampleRate > 0 ? info.sampleRate : 48000.0;
+    const double quarter = waveform::Timing::quarterNotesFromSamples (info.positionSamples, rate, info.tempoBpm);
+    arrangement_.setState (&project_, quarter, selectedClipId_, armedTrackId_);
+    const std::string monitorId = armedTrackId_.empty() ? selectedTrackId_ : armedTrackId_;
+    int monitor = -1;
+
+    for (std::size_t index = 0; index < project_.tracks.size(); ++index)
+        if (project_.tracks[index].id == monitorId && project_.tracks[index].type == waveform::TrackType::Midi)
+            monitor = static_cast<int> (index);
+
+    engine_.setMonitorTrack (monitor);
+
+    const bool recording = info.recording || info.countingIn;
+    recordButton_.setColour (juce::TextButton::buttonColourId,
+                             juce::Colour (recording ? waveform::StudioLookAndFeel::kRose : waveform::StudioLookAndFeel::kPanel));
+}
+
+void MainComponent::refreshPiano()
+{
+    const waveform::MidiClip* clip = nullptr;
+
+    if (auto* track = waveform::findTrack (project_, selectedTrackId_))
+        for (const auto& candidate : track->clips)
+            if (const auto* midi = std::get_if<waveform::MidiClip> (&candidate); midi != nullptr && midi->id == selectedClipId_)
+                clip = midi;
+
+    pianoRoll_.setClip (clip);
+}
+
+void MainComponent::refreshMidiInputs()
+{
+    const juce::ScopedValueSetter<bool> guard (updatingControls_, true);
+    const int previous = midiInputBox_.getSelectedId();
+    juce::String previousId;
+
+    if (previous >= 2)
+    {
+        const int index = previous - 2;
+
+        if (index >= 0 && index < static_cast<int> (midiInputIds_.size()))
+            previousId = midiInputIds_[static_cast<std::size_t> (index)];
+    }
+
+    midiInputIds_.clear();
+    midiInputBox_.clear (juce::dontSendNotification);
+    midiInputBox_.addItem ("No MIDI input", 1);
+    int itemId = 2;
+    int restore = 1;
+
+    for (const auto& device : juce::MidiInput::getAvailableDevices())
+    {
+        midiInputBox_.addItem (device.name, itemId);
+
+        if (device.identifier == previousId)
+            restore = itemId;
+
+        ++itemId;
+        midiInputIds_.push_back (device.identifier);
+    }
+
+    midiInputBox_.setSelectedId (restore, juce::dontSendNotification);
+}
+
+void MainComponent::armTrack (const std::string& trackId)
+{
+    armedTrackId_ = armedTrackId_ == trackId ? std::string {} : trackId;
+    selectedTrackId_ = trackId;
+    int index = -1;
+
+    for (std::size_t i = 0; i < project_.tracks.size(); ++i)
+        if (project_.tracks[i].id == armedTrackId_)
+            index = static_cast<int> (i);
+
+    engine_.setMonitorTrack (index >= 0 && project_.tracks[static_cast<std::size_t> (index)].type == waveform::TrackType::Midi ? index : -1);
+    refreshArrangement();
+}
+
+void MainComponent::selectClip (const std::string& trackId, const std::string& clipId)
+{
+    selectedTrackId_ = trackId;
+    selectedClipId_ = clipId;
+    rebuildSelection();
+    refreshPiano();
+    refreshArrangement();
+}
+
+void MainComponent::moveClip (const std::string& trackId, const std::string& clipId, double startQuarterNotes)
+{
+    history_.execute (project_, std::make_unique<waveform::MoveClipCommand> (trackId, clipId, startQuarterNotes));
+    syncEngine();
+    refreshHistoryButtons();
+    rebuildTracks();
+}
+
+void MainComponent::createMidiClip (const std::string& trackId, double startQuarterNotes)
+{
+    waveform::MidiClip clip;
+    clip.name = "Clip";
+    clip.startQuarterNotes = startQuarterNotes;
+    clip.lengthQuarterNotes = 4.0;
+    auto command = std::make_unique<waveform::AddMidiClipCommand> (trackId, std::move (clip));
+    selectedTrackId_ = trackId;
+    selectedClipId_ = command->clipId();
+    history_.execute (project_, std::move (command));
+    syncEngine();
+    rebuildTracks();
+    refreshHistoryButtons();
+    refreshPiano();
+}
+
+void MainComponent::commitNotes (std::vector<waveform::MidiNote> notes)
+{
+    if (selectedClipId_.empty())
+        return;
+
+    history_.execute (project_, std::make_unique<waveform::SetMidiNotesCommand> (selectedTrackId_, selectedClipId_, std::move (notes)));
+    syncEngine();
+    refreshHistoryButtons();
+    refreshPiano();
+}
+
+void MainComponent::record()
+{
+    if (armedTrackId_.empty())
+        armedTrackId_ = selectedTrackId_;
+
+    const auto* track = waveform::findTrack (project_, armedTrackId_);
+
+    if (track == nullptr)
+    {
+        setStatus ("Arm a track with R, then record.");
+        return;
+    }
+
+    int index = -1;
+
+    for (std::size_t i = 0; i < project_.tracks.size(); ++i)
+        if (project_.tracks[i].id == track->id)
+            index = static_cast<int> (i);
+
+    const bool midi = track->type == waveform::TrackType::Midi;
+
+    if (! midi)
+        engine_.prepareAudioCapture (180.0);
+
+    engine_.setMonitorTrack (midi ? index : -1);
+
+    if (! engine_.startRecording (index, project_.countInBars, midi))
+        setStatus ("Recording needs an open audio device.");
+    else
+        setStatus (midi ? "Count-in, then play the keyboard." : "Count-in, then the input is recorded.");
+}
+
+void MainComponent::commitTake()
+{
+    const auto midi = engine_.copyMidiTake();
+
+    if (midi.valid && midi.trackIndex >= 0 && midi.trackIndex < static_cast<int> (project_.tracks.size()))
+    {
+        waveform::MidiClip clip;
+        clip.name = "MIDI take";
+        clip.startQuarterNotes = std::max (0.0, midi.startQuarterNotes);
+        double end = 1.0;
+
+        for (const auto& note : midi.notes)
+        {
+            waveform::MidiNote stored;
+            stored.note = note.note;
+            stored.velocity = note.velocity;
+            stored.channel = note.channel;
+            stored.startQuarterNotes = std::max (0.0, note.startQuarterNotes);
+            stored.lengthQuarterNotes = std::max (0.05, note.lengthQuarterNotes);
+            end = std::max (end, stored.startQuarterNotes + stored.lengthQuarterNotes);
+            clip.notes.push_back (stored);
+        }
+
+        clip.lengthQuarterNotes = end + 0.25;
+        auto command = std::make_unique<waveform::AddMidiClipCommand> (project_.tracks[static_cast<std::size_t> (midi.trackIndex)].id, std::move (clip));
+        selectedTrackId_ = project_.tracks[static_cast<std::size_t> (midi.trackIndex)].id;
+        selectedClipId_ = command->clipId();
+        history_.execute (project_, std::move (command));
+        syncEngine();
+        rebuildTracks();
+        refreshHistoryButtons();
+        setStatus ("Saved the MIDI take.");
+        return;
+    }
+
+    const auto audio = engine_.copyAudioTake();
+
+    if (! audio.valid || audio.trackIndex < 0 || audio.trackIndex >= static_cast<int> (project_.tracks.size()))
+        return;
+
+    const auto directory = projectFile_.existsAsFile()
+                               ? projectFile_.getParentDirectory().getChildFile ("Recordings")
+                               : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Waveform Studio").getChildFile ("Recordings");
+    directory.createDirectory();
+    const auto file = directory.getChildFile ("Take " + juce::String (directory.getNumberOfChildFiles (juce::File::findFiles, "*.wav") + 1) + ".wav");
+    std::string error;
+
+    if (! waveform::writeStereoWav (file.getFullPathName().toStdString(), audio.sampleRate, audio.left.data(), audio.right.data(),
+                                    static_cast<std::int64_t> (audio.left.size()), error))
+    {
+        setStatus (error.empty() ? "Could not write the audio take." : juce::String (error));
+        return;
+    }
+
+    waveform::AudioClip clip;
+    clip.name = file.getFileNameWithoutExtension().toStdString();
+    clip.file = file.getFullPathName().toStdString();
+    clip.startQuarterNotes = std::max (0.0, audio.startQuarterNotes);
+    clip.lengthSeconds = static_cast<double> (audio.left.size()) / std::max (1.0, audio.sampleRate);
+    history_.execute (project_, std::make_unique<waveform::AddAudioClipCommand> (project_.tracks[static_cast<std::size_t> (audio.trackIndex)].id, std::move (clip)));
+    syncEngine();
+    rebuildTracks();
+    refreshHistoryButtons();
+    setStatus ("Saved the audio take.");
 }
 
 void MainComponent::showDeviceSettings()

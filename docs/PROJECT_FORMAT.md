@@ -42,6 +42,25 @@ Version 1. Files are UTF-8 JSON. Key order does not matter. Unknown keys are ign
 
 `master.gainDb` uses the same decibel range. Master pan, mute, and solo are not used.
 
+`countInBars` is optional and defaults to 0 when it is absent. New projects start at 1. It is the number of bars of metronome heard before a recording punch-in. Values are clamped to 0..8.
+
+A MIDI track may include a `synth` object for the built-in instrument. If it is absent, the track uses the default saw patch.
+
+```json
+"synth": {
+  "wave": "saw",
+  "detuneCents": 6.0,
+  "cutoffHz": 1800.0,
+  "resonance": 0.2,
+  "attack": 0.01,
+  "decay": 0.12,
+  "sustain": 0.7,
+  "release": 0.2
+}
+```
+
+`wave` is `sine`, `saw`, `square`, or `triangle`.
+
 ## Clips
 
 Clips live in `tracks[].clips` in timeline order. Each clip has a `type`.
@@ -63,7 +82,7 @@ Audio clips are **not warped**. The file plays at its recorded speed. `startQuar
 
 `file` is either absolute, or relative to the directory that contains the project file, using forward slashes. Saving a project rewrites paths that live inside that directory as relative paths so the same folder can move between macOS and Windows.
 
-MIDI clips store notes only. Phase 0 does not turn them into sound.
+MIDI clips store notes and the built-in polysynth plays them. `note` timing is in quarter notes from the start of the clip.
 
 ```json
 {

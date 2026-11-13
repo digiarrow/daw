@@ -138,6 +138,7 @@ void Transport::apply (const EngineCommand& command) noexcept
         case EngineCommandType::SetLoopEnabled: setLoopEnabled (command.a != 0); break;
         case EngineCommandType::SetMetronome:
         case EngineCommandType::SetTestTone:
+        case EngineCommandType::StartRecord:
             break;
     }
 }

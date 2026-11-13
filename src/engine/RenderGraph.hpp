@@ -2,6 +2,7 @@
 
 #include "ClipLibrary.hpp"
 #include "waveform/project.hpp"
+#include "waveform/synth.hpp"
 #include "waveform/synthesis.hpp"
 
 #include <atomic>
@@ -21,13 +22,42 @@ struct RenderClip
     float gain = 1.0f;
 };
 
+struct RenderMidiNote
+{
+    int note = 60;
+    int velocity = 100;
+    double startQuarterNotes = 0.0;
+    double lengthQuarterNotes = 1.0;
+};
+
+struct RenderMidiClip
+{
+    double startQuarterNotes = 0.0;
+    double lengthQuarterNotes = 4.0;
+    std::vector<RenderMidiNote> notes;
+};
+
 struct RenderTrack
 {
     std::vector<RenderClip> clips;
+    std::vector<RenderMidiClip> midiClips;
+    SynthPatch patch;
+    bool isMidi = false;
     float gain = 1.0f;
     float pan = 0.0f;
     bool mute = false;
     bool solo = false;
+};
+
+/// Per-track synth memory plus any keys currently held from a MIDI input.
+/// The audio thread owns the memory. Null skips MIDI rendering.
+struct SynthSchedule
+{
+    SynthVoiceMemory* memories = nullptr;
+    int memoryCount = 0;
+    const SoundingNote* liveNotes = nullptr;
+    int liveNoteCount = 0;
+    int liveTrack = -1;
 };
 
 /// Immutable snapshot the audio thread reads. Built on the message thread.
@@ -64,6 +94,7 @@ void renderLinearBlock (const RenderGraph* graph,
                         bool metronome,
                         bool testTone,
                         Oscillator* tone,
-                        std::atomic<int>* overflowCount) noexcept;
+                        std::atomic<int>* overflowCount,
+                        SynthSchedule* synth) noexcept;
 
 } // namespace waveform

@@ -10,9 +10,13 @@ What this slice does:
 - JSON save and load, plus undo and redo.
 - Plays a WAV (also AIFF, FLAC, or Ogg) in time with the transport through a stereo master.
 - A small window: transport, tempo, device rate and buffer, track list, and an add-file button.
-- A metronome locked to the clock, and a test tone that sounds even when the transport is stopped.
+- A metronome locked to the clock, with a count-in before recording, and a test tone that sounds even when the transport is stopped.
+- MIDI input, MIDI recording, and playback through a built-in polyphonic synth (oscillator, ADSR, low-pass filter).
+- A piano roll: draw, move, resize, delete, velocity, grid snap, and quantize. Those edits undo.
+- An arrangement timeline: clips on a bar grid, drag to move, a playhead, and a loop brace.
+- Audio recording from the device input onto an audio track.
 
-MIDI clips are stored and round-trip through the project file. They do not make sound yet. There is no recording, no time-stretch, and no plug-in hosting.
+There is still no time-stretch and no plug-in hosting. The synth is the built-in instrument, not a hosted plug-in.
 
 The engine and the thread model are described in [ARCHITECTURE.md](ARCHITECTURE.md). The project file is specified in [docs/PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md).
 
@@ -136,8 +140,10 @@ The device backend is ALSA.
 3. Press **Load Demo**. It loads `examples/demo.json` and an original four-second tone, `examples/demo-tone.wav`.
 4. Press **Play** (or Space). The tone starts on beat 1 and the counter advances as `bar.beat.tick`. **Click** adds a metronome on the same grid. **Loop** repeats bars 1–2 of the demo.
 5. **Add Audio File** places a WAV, AIFF, FLAC, or Ogg clip at the playhead on the selected audio track.
-6. **Save** writes a JSON project. Paths inside the project folder are stored relative to that file.
-7. Undo and redo cover tempo, tracks, clips, and mixer moves. Ctrl+Z / Cmd+Z and Ctrl+Shift+Z / Cmd+Shift+Z are wired.
+6. The timeline under the transport shows every clip. Drag a clip to move it (it snaps to 16ths). Drag the copper marks in the ruler to set the loop. Click the ruler to seek. Double-click an empty MIDI lane to create a clip, then edit it in the piano roll below.
+7. Choose a MIDI input. Arm a MIDI track with **R**, press **Record**, and play the keyboard after the count-in. Stop, and the take becomes a clip you can quantize or redraw. Arm an audio track the same way to record the device input. The app opens the default input as well as the output; pick another input from **Audio Device** if the take is silent.
+8. **Save** writes a JSON project. Paths inside the project folder are stored relative to that file.
+9. Undo and redo cover tempo, tracks, clips, mixer moves, clip drags, and piano-roll edits. Ctrl+Z / Cmd+Z and Ctrl+Shift+Z / Cmd+Shift+Z are wired.
 
 Change the sample rate or buffer from the combo boxes or the device window. Clips are resampled to the new rate on the message thread before the callback sees them.
 
@@ -172,25 +178,24 @@ examples/      demo project and generated tone
 
 ## Limits
 
-- Clips are decoded into memory, capped at 10 minutes.
+- Clips are decoded into memory, capped at 10 minutes. An audio take is capped at 3 minutes.
 - Audio plays at its recorded speed. Tempo does not stretch it.
-- MIDI notes are saved, not synthesised. Soloing only a MIDI track silences the audio tracks.
+- The synth is one polyphonic voice per sounding note: two detuned oscillators, an ADSR, and a low-pass filter. Oscillators are not band-limited. Every MIDI track uses its own patch, but there is no external instrument.
+- Live MIDI is applied at the start of the next audio block, so the monitoring latency is about one buffer.
+- Soloing a track still silences the others, including the synth.
 - One stereo master. The output is hard-clipped at full scale.
 - Resampling is linear, done when a file is loaded or the device rate changes.
 - Moving a fader rebuilds the mix graph on the message thread.
 - Stop returns to the start. Pause holds the playhead.
 - The product name is a placeholder.
 
-## Phase 1
+## What to build next
 
-A useful next slice is an arrangement view on top of this clock, plus sound for MIDI:
-
-- One lane per track, clip rectangles, a playhead, and click-to-seek via the existing transport command.
-- Peak data built when a file is decoded.
-- Record the device input into a new audio clip.
-- A small synth voice so stored MIDI clips play, and a piano roll that edits `MidiNote` through the command stack.
-- Keep plug-in hosting behind a `TrackProcessor` prepared on the message thread and processed after the clip sum. VST3 and Audio Units can implement that later without changing the document types until a file-version bump.
-- Then sends, a session grid that launches clips by id, and warp as an explicit mode that does not change the meaning of `lengthSeconds`.
+- Mixer routing: track outputs, sends, and a real meter bridge. Faders should become atomics so they do not rebuild the graph.
+- Plug-in hosting behind a `TrackProcessor` after the clip sum. VST3 on both desktops, and Audio Units on macOS. Store the identifier and state blob in a new project-file version.
+- A session grid that launches the clips that already exist, by id, on the same transport.
+- Waveform peaks in the arrangement, and a band-limited oscillator if the saw gets too harsh.
+- Warp as an explicit mode that does not change the meaning of `lengthSeconds`.
 
 Details are in [ARCHITECTURE.md](ARCHITECTURE.md).
 

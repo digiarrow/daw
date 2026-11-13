@@ -29,4 +29,12 @@ struct OfflineRenderResult
 /// Renders a project to a 16-bit stereo WAV using the same clock and mixer as live playback.
 [[nodiscard]] OfflineRenderResult renderProjectFile (const OfflineRenderRequest& request);
 
+/// Writes a 16-bit stereo WAV. `right` may be null to duplicate `left`.
+[[nodiscard]] bool writeStereoWav (const std::string& utf8Path,
+                                   double sampleRate,
+                                   const float* left,
+                                   const float* right,
+                                   std::int64_t frames,
+                                   std::string& error);
+
 } // namespace waveform

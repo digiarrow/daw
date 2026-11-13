@@ -12,7 +12,7 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
-project(WaveformStudio VERSION 0.1.0 LANGUAGES C CXX)
+project(WaveformStudio VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -107,7 +107,9 @@ endif()
 
 add_library(waveform_core STATIC
     src/core/src/commands.cpp
+    src/core/src/midi.cpp
     src/core/src/mix.cpp
+    src/core/src/synth.cpp
     src/core/src/paths.cpp
     src/core/src/project.cpp
     src/core/src/serialize.cpp
@@ -155,14 +157,16 @@ juce_add_gui_app(WaveformStudio
     PRODUCT_NAME "WaveformStudio"
     COMPANY_NAME "WaveformStudio"
     BUNDLE_ID "studio.waveform.app"
-    VERSION "0.1.0"
+    VERSION "0.2.0"
 )
 
 file(TO_CMAKE_PATH "${CMAKE_SOURCE_DIR}/examples" WAVEFORM_EXAMPLES_DIR_CMAKE)
 
 target_sources(WaveformStudio PRIVATE
+    src/app/ArrangementView.cpp
     src/app/Main.cpp
     src/app/MainComponent.cpp
+    src/app/PianoRoll.cpp
 )
 target_include_directories(WaveformStudio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/app")
 target_compile_definitions(WaveformStudio PRIVATE "WAVEFORM_EXAMPLES_DIR=\"${WAVEFORM_EXAMPLES_DIR_CMAKE}\"")
@@ -188,6 +192,7 @@ waveform_set_output_dirs(waveform-render)
 
 if(WAVEFORM_BUILD_TESTS)
     add_executable(waveform_tests
+        tests/test_midi.cpp
         tests/test_mix.cpp
         tests/test_project.cpp
         tests/test_queue.cpp

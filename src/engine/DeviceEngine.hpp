@@ -2,10 +2,12 @@
 
 #include "RenderGraph.hpp"
 #include "waveform/queue.hpp"
+#include "waveform/synth.hpp"
 #include "waveform/transport.hpp"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -29,7 +31,37 @@ struct PlaybackInfo
     bool testTone = false;
     int deviceGeneration = 0;
     bool structureOverflow = false;
+    bool recording = false;
+    bool countingIn = false;
+    int recordEpoch = 0;
     juce::String deviceName;
+};
+
+struct MidiTakeNote
+{
+    int note = 60;
+    int velocity = 100;
+    int channel = 1;
+    double startQuarterNotes = 0.0;
+    double lengthQuarterNotes = 0.25;
+};
+
+struct MidiTake
+{
+    bool valid = false;
+    int trackIndex = -1;
+    double startQuarterNotes = 0.0;
+    std::vector<MidiTakeNote> notes;
+};
+
+struct AudioTake
+{
+    bool valid = false;
+    int trackIndex = -1;
+    double startQuarterNotes = 0.0;
+    double sampleRate = 0.0;
+    std::vector<float> left;
+    std::vector<float> right;
 };
 
 /// Opens the default output through juce::AudioDeviceManager and renders the project.
@@ -40,7 +72,8 @@ struct PlaybackInfo
 ///   * Commands cross the boundary through SpscQueue. Graphs cross through an atomic pointer
 ///     with deferred reclamation (see DeviceEngine.cpp). The audio callback does not allocate,
 ///     lock, log, or touch the file system.
-class DeviceEngine : public juce::AudioIODeviceCallback
+class DeviceEngine : public juce::AudioIODeviceCallback,
+                      private juce::MidiInputCallback
 {
 public:
     DeviceEngine();
@@ -68,6 +101,19 @@ public:
     bool setLoop (bool enabled, double startQuarterNotes, double endQuarterNotes);
     bool setMetronome (bool enabled);
     bool setTestTone (bool enabled);
+    bool seekQuarterNotes (double quarterNotes);
+
+    /// Enables one MIDI input. An empty id disables input. Message thread only.
+    void setMidiInput (const juce::String& deviceIdentifier);
+    void setMonitorTrack (int trackIndex) noexcept;
+
+    /// Allocates the audio-take buffers before startRecording. Message thread only.
+    void prepareAudioCapture (double maxSeconds);
+    bool startRecording (int trackIndex, int countInBars, bool midi);
+
+    [[nodiscard]] int recordEpoch() const noexcept;
+    [[nodiscard]] MidiTake copyMidiTake() const;
+    [[nodiscard]] AudioTake copyAudioTake() const;
 
     /// Drops graphs the audio thread has finished reading. Call from the message thread.
     void maintenance();
@@ -89,11 +135,18 @@ private:
 
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override;
     void audioDeviceStopped() override;
+    void handleIncomingMidiMessage (juce::MidiInput* source, const juce::MidiMessage& message) override;
 
     bool push (EngineCommand command);
     void applyLocal (const EngineCommand& command) noexcept;
     void drainCommands() noexcept;
     void publishInfo() noexcept;
+    void beginRecordingNow() noexcept;
+    void finishRecording() noexcept;
+    void drainLiveMidi() noexcept;
+    void closeOpenMidiNotes() noexcept;
+    int collectLiveNotes (SoundingNote* destination, int capacity) const noexcept;
+    void advanceLiveNotes (int frames) noexcept;
 
     void publishGraph (std::shared_ptr<const RenderGraph> graph);
     const RenderGraph* acquireGraph() noexcept;
@@ -131,6 +184,62 @@ private:
     std::atomic<int> testToneFlag_ { 0 };
     std::atomic<int> deviceGeneration_ { 0 };
     std::atomic<int> structureOverflow_ { 0 };
+    std::atomic<int> monitorTrack_ { -1 };
+    std::atomic<int> recordingFlag_ { 0 };
+    std::atomic<int> countingFlag_ { 0 };
+    std::atomic<int> recordEpoch_ { 0 };
+    std::atomic<int> publishedFrames_ { 0 };
+    std::atomic<int> publishedMidiCount_ { 0 };
+    std::atomic<std::int32_t> publishedStartMicro_ { 0 };
+    std::atomic<int> publishedTrack_ { -1 };
+    std::atomic<int> publishedMidi_ { 0 };
+
+    struct IncomingMidi
+    {
+        std::uint8_t note = 0;
+        std::uint8_t velocity = 0;
+        std::uint8_t channel = 1;
+    };
+
+    struct LiveSlot
+    {
+        bool down = false;
+        bool releasing = false;
+        bool written = false;
+        int velocity = 0;
+        int age = 0;
+        int releaseAge = 0;
+        std::int32_t startMicro = 0;
+    };
+
+    struct RecordedMidiSlot
+    {
+        int note = 0;
+        int velocity = 0;
+        int channel = 1;
+        std::int32_t startMicro = 0;
+        std::int32_t endMicro = -1;
+    };
+
+    static constexpr int kMaxRecordedNotes = 2048;
+
+    SpscQueue<IncomingMidi, 256> midiQueue_;
+    juce::String activeMidi_;
+    std::array<SynthVoiceMemory, 64> synthMemory_ {};
+    LiveSlot live_[128] {};
+    RecordedMidiSlot midiSlots_[kMaxRecordedNotes] {};
+    int midiCount_ = 0;
+    std::vector<float> recordLeft_;
+    std::vector<float> recordRight_;
+    int recordCapacity_ = 0;
+    int recordWrite_ = 0;
+    bool recording_ = false;
+    bool countingIn_ = false;
+    bool recordMidi_ = false;
+    int recordTrack_ = -1;
+    int countInRemaining_ = 0;
+    int countInElapsed_ = 0;
+    double recordStartQuarter_ = 0.0;
 
     // Graph publication. `current_` is exchanged by the message thread and loaded by the audio thread.
     // `inUse_` is 0 outside the callback, 1 while the pointer is being loaded, otherwise the holder address.
