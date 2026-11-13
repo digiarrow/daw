@@ -3,6 +3,7 @@
 #include "ClipLibrary.hpp"
 #include "waveform/effects.hpp"
 #include "waveform/project.hpp"
+#include "waveform/later.hpp"
 #include "waveform/routing.hpp"
 #include "waveform/session.hpp"
 #include "waveform/synth.hpp"
@@ -73,6 +74,7 @@ struct RenderTrack
     float sendGain[kMaxSends] { 0.0f, 0.0f };
     EffectSlot effects[kMaxInserts] {};
     int effectCount = 0;
+    std::vector<RackChain> chains;
     bool sampler = false;
     InstrumentKind instrument = InstrumentKind::Synth;
     std::vector<RenderSamplerZone> zones;
@@ -100,6 +102,11 @@ struct BlockScratch
     float* busLeft[kMaxBuses] {};
     float* busRight[kMaxBuses] {};
     EffectState* effects = nullptr; ///< Row-major, track * kMaxInserts + slot.
+    float* rackOutLeft = nullptr;
+    float* rackOutRight = nullptr;
+    float* rackScratchLeft = nullptr;
+    float* rackScratchRight = nullptr;
+    EffectState* rackStates = nullptr;
     int capacity = 0;
 };
 

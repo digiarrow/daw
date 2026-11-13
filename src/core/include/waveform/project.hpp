@@ -136,6 +136,35 @@ enum class InstrumentKind
     Drum
 };
 
+struct DeviceChain
+{
+    std::string name = "Chain";
+    float gain = 1.0f;
+    std::vector<EffectSlot> effects;
+};
+
+struct MacroAssignment
+{
+    int chain = 0;
+    int effect = 0;
+    int parameter = 0;
+    double minimum = 0.0;
+    double maximum = 1.0;
+};
+
+struct DeviceMacro
+{
+    std::string name = "Macro";
+    double value = 0.5;
+    std::vector<MacroAssignment> assignments;
+};
+
+struct DeviceRack
+{
+    std::vector<DeviceChain> chains;
+    std::vector<DeviceMacro> macros;
+};
+
 struct Track
 {
     std::string id;
@@ -150,6 +179,7 @@ struct Track
     std::vector<AutomationLane> automation;
     std::vector<Send> sends;
     std::vector<EffectSlot> effects;
+    DeviceRack rack;
     std::vector<Clip> clips;
     std::vector<SessionSlot> session;
     std::string pluginIdentifier;

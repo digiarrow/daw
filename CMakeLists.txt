@@ -187,6 +187,7 @@ target_sources(WaveformStudio PRIVATE
     src/app/Main.cpp
     src/app/MainComponent.cpp
     src/app/PianoRoll.cpp
+    src/app/RackEditor.cpp
     src/app/SessionView.cpp
 )
 target_include_directories(WaveformStudio PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/app")

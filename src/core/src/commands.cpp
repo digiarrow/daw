@@ -879,6 +879,32 @@ void SetPluginCommand::revert (Project& project)
 
 const char* SetPluginCommand::name() const { return "Plug-in"; }
 
+SetRackCommand::SetRackCommand (std::string trackId, DeviceRack rack)
+    : trackId_ (std::move (trackId)), next_ (std::move (rack))
+{
+}
+
+void SetRackCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = track->rack;
+    track->rack = next_;
+}
+
+void SetRackCommand::revert (Project& project)
+{
+    if (applied_)
+        if (auto* track = findTrack (project, trackId_))
+            track->rack = previous_;
+}
+
+const char* SetRackCommand::name() const { return "Rack"; }
+
 SetInstrumentCommand::SetInstrumentCommand (std::string trackId, InstrumentKind instrument)
     : trackId_ (std::move (trackId)), next_ (instrument)
 {

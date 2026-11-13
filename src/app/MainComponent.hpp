@@ -4,6 +4,7 @@
 #include "BrowserPanel.hpp"
 #include "DeviceEngine.hpp"
 #include "PianoRoll.hpp"
+#include "RackEditor.hpp"
 #include "SessionView.hpp"
 #include "waveform/commands.hpp"
 #include "waveform/later.hpp"
@@ -84,6 +85,7 @@ private:
     void syncPlugins();
     void openPluginEditor();
     void showScriptConsole();
+    void showRackEditor();
     void showMidiMap();
     void applyLearnedControl();
 
@@ -127,6 +129,7 @@ private:
     juce::TextButton pluginButton_ { "Plug-in" };
     juce::TextButton automationButton_ { "Volume lane" };
     juce::TextButton scriptButton_ { "Script" };
+    juce::TextButton rackButton_ { "Rack" };
     juce::TextButton midiMapButton_ { "MIDI map" };
 
     juce::ToggleButton loopButton_ { "Loop" };
@@ -156,6 +159,7 @@ private:
     std::unique_ptr<juce::DocumentWindow> deviceWindow_;
     std::unique_ptr<juce::DocumentWindow> pluginWindow_;
     std::unique_ptr<juce::DocumentWindow> scriptWindow_;
+    std::unique_ptr<juce::DocumentWindow> rackWindow_;
     std::unique_ptr<juce::DocumentWindow> midiMapWindow_;
     std::vector<waveform::ControlMapping> controlMap_;
     bool learningControl_ = false;

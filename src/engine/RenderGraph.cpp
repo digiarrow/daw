@@ -156,6 +156,32 @@ GraphBuildResult buildGraph (const Project& project,
         for (int effect = 0; effect < rendered.effectCount; ++effect)
             rendered.effects[effect] = track.effects[static_cast<std::size_t> (effect)];
 
+        for (std::size_t chainIndex = 0; chainIndex < track.rack.chains.size() && chainIndex < 4; ++chainIndex)
+        {
+            RackChain chain;
+            chain.gain = track.rack.chains[chainIndex].gain;
+            chain.effects = track.rack.chains[chainIndex].effects;
+
+            for (const auto& macro : track.rack.macros)
+            {
+                for (const auto& assignment : macro.assignments)
+                {
+                    if (assignment.chain != static_cast<int> (chainIndex) || assignment.effect < 0
+                        || assignment.effect >= static_cast<int> (chain.effects.size()))
+                        continue;
+
+                    auto& effect = chain.effects[static_cast<std::size_t> (assignment.effect)];
+                    const double value = assignment.minimum + std::clamp (macro.value, 0.0, 1.0) * (assignment.maximum - assignment.minimum);
+                    double* slots[] = { &effect.p0, &effect.p1, &effect.p2, &effect.p3, &effect.p4, &effect.p5 };
+
+                    if (assignment.parameter >= 0 && assignment.parameter < 6)
+                        *slots[assignment.parameter] = value;
+                }
+            }
+
+            rendered.chains.push_back (std::move (chain));
+        }
+
         if (track.type == TrackType::Midi)
         {
             for (const auto& clipValue : track.clips)
@@ -537,6 +563,10 @@ void renderLinearBlock (const RenderGraph* graph,
             routed = true;
 
         for (const auto& track : graph->tracks)
+            if (! track.chains.empty())
+                routed = true;
+
+        for (const auto& track : graph->tracks)
             if (track.group || track.effectCount > 0 || track.outputBus != 0 || track.sendGain[0] > 0.0f || track.sendGain[1] > 0.0f)
                 routed = true;
     }
@@ -589,6 +619,19 @@ void renderLinearBlock (const RenderGraph* graph,
 
             if (external != nullptr && external->process != nullptr)
                 external->process (external->context, index, scratch->trackLeft[index], scratch->trackRight[index], frames);
+
+            if (! source.chains.empty() && scratch->rackStates != nullptr && scratch->rackOutLeft != nullptr
+                && scratch->rackScratchLeft != nullptr && index < 8)
+            {
+                mixRack (source.chains.data(), static_cast<int> (source.chains.size()),
+                         scratch->rackStates + index * 4 * kMaxInserts, kMaxInserts,
+                         scratch->trackLeft[index], scratch->trackRight[index],
+                         scratch->rackOutLeft, scratch->rackOutRight,
+                         scratch->rackScratchLeft, scratch->rackScratchRight,
+                         frames, sampleRate);
+                std::copy (scratch->rackOutLeft, scratch->rackOutLeft + frames, scratch->trackLeft[index]);
+                std::copy (scratch->rackOutRight, scratch->rackOutRight + frames, scratch->trackRight[index]);
+            }
 
             const PanGains pan = constantPowerPan (saved.pan);
             endpoints[index].outputBus = source.outputBus;

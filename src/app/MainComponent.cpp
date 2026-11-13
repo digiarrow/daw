@@ -642,6 +642,7 @@ MainComponent::MainComponent()
     exportButton_.onClick = [this] { exportWav(); };
     pluginButton_.onClick = [this] { showPluginMenu(); };
     scriptButton_.onClick = [this] { showScriptConsole(); };
+    rackButton_.onClick = [this] { showRackEditor(); };
     midiMapButton_.onClick = [this] { showMidiMap(); };
 
     sampleRateBox_.onChange = [this]
@@ -675,7 +676,7 @@ MainComponent::MainComponent()
              &undoButton_, &redoButton_, &addFileButton_, &addAudioTrackButton_, &addMidiTrackButton_,
              &loadDemoButton_, &openButton_, &saveButton_, &collectButton_, &exportButton_, &addDelayButton_, &makeGroupButton_, &loopButton_, &metronomeButton_, &toneButton_,
              &bpmSlider_, &masterSlider_, &numeratorBox_, &denominatorBox_, &sampleRateBox_, &bufferBox_,
-             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_,
+             &countInBox_, &midiInputBox_, &launchBox_, &instrumentBox_, &arrangementButton_, &sessionButton_, &pluginButton_, &automationButton_, &scriptButton_, &midiMapButton_, &rackButton_,
              &arrangement_, &session_, &pianoRoll_, &browser_, &trackViewport_ })
     {
         addAndMakeVisible (component);
@@ -818,6 +819,8 @@ void MainComponent::resized()
     instrumentBox_.setBounds (trackHeader.removeFromLeft (100));
     trackHeader.removeFromLeft (4);
     automationButton_.setBounds (trackHeader.removeFromLeft (100));
+    trackHeader.removeFromLeft (4);
+    rackButton_.setBounds (trackHeader.removeFromLeft (64));
     exportButton_.setBounds (trackHeader.removeFromRight (96));
     trackHeader.removeFromRight (6);
     collectButton_.setBounds (trackHeader.removeFromRight (80));
@@ -1846,6 +1849,35 @@ void MainComponent::showPluginMenu()
                             const int latency = engine_.plugins().latency (index);
                             setStatus ("Loaded " + description.name + ". Latency " + juce::String (latency) + " samples, compensated on the other tracks.");
                         });
+}
+
+void MainComponent::showRackEditor()
+{
+    auto* track = selectedTrack();
+
+    if (track == nullptr)
+    {
+        setStatus ("Select a track before editing its rack.");
+        return;
+    }
+
+    auto* editor = new RackEditor();
+    editor->setSize (560, 460);
+    const auto id = track->id;
+    editor->onCommit = [this, id] (waveform::DeviceRack rack)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetRackCommand> (id, std::move (rack)));
+        syncEngine();
+        refreshHistoryButtons();
+    };
+    editor->setRack (track->rack);
+    rackWindow_ = std::make_unique<juce::DocumentWindow> ("Rack",
+                                                          juce::Colour (waveform::StudioLookAndFeel::kPanel),
+                                                          juce::DocumentWindow::closeButton);
+    rackWindow_->setContentOwned (editor, true);
+    rackWindow_->setUsingNativeTitleBar (true);
+    rackWindow_->centreWithSize (580, 500);
+    rackWindow_->setVisible (true);
 }
 
 void MainComponent::showScriptConsole()

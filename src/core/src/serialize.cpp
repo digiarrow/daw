@@ -92,6 +92,7 @@ MixerState mixerFromJson (const json& node)
     return mixer;
 }
 
+json rackToJson (const DeviceRack& rack);
 json warpToJson (const std::vector<WarpMarker>& markers);
 json takesToJson (const std::vector<ClipTake>& takes);
 json compToJson (const std::vector<CompSegment>& segments);
@@ -444,6 +445,66 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
         }
     }
 
+    if (node.contains ("rack") && node.at ("rack").is_object())
+    {
+        const auto& rackNode = node.at ("rack");
+
+        if (rackNode.contains ("chains") && rackNode.at ("chains").is_array())
+        {
+            for (const auto& chainNode : rackNode.at ("chains"))
+            {
+                DeviceChain chain;
+                chain.name = requireString (chainNode, "name");
+                chain.gain = static_cast<float> (requireNumber (chainNode, "gain"));
+
+                if (chainNode.contains ("effects") && chainNode.at ("effects").is_array())
+                {
+                    for (const auto& effectNode : chainNode.at ("effects"))
+                    {
+                        EffectSlot effect;
+                        effect.kind = effectFromName (requireString (effectNode, "kind").c_str());
+                        effect.bypass = requireBool (effectNode, "bypass");
+                        effect.p0 = requireNumber (effectNode, "p0");
+                        effect.p1 = requireNumber (effectNode, "p1");
+                        effect.p2 = requireNumber (effectNode, "p2");
+                        effect.p3 = requireNumber (effectNode, "p3");
+                        effect.p4 = requireNumber (effectNode, "p4");
+                        effect.p5 = requireNumber (effectNode, "p5");
+                        chain.effects.push_back (effect);
+                    }
+                }
+
+                track.rack.chains.push_back (std::move (chain));
+            }
+        }
+
+        if (rackNode.contains ("macros") && rackNode.at ("macros").is_array())
+        {
+            for (const auto& macroNode : rackNode.at ("macros"))
+            {
+                DeviceMacro macro;
+                macro.name = requireString (macroNode, "name");
+                macro.value = requireNumber (macroNode, "value");
+
+                if (macroNode.contains ("assignments") && macroNode.at ("assignments").is_array())
+                {
+                    for (const auto& assignmentNode : macroNode.at ("assignments"))
+                    {
+                        MacroAssignment assignment;
+                        assignment.chain = requireInt (assignmentNode, "chain");
+                        assignment.effect = requireInt (assignmentNode, "effect");
+                        assignment.parameter = requireInt (assignmentNode, "parameter");
+                        assignment.minimum = requireNumber (assignmentNode, "minimum");
+                        assignment.maximum = requireNumber (assignmentNode, "maximum");
+                        macro.assignments.push_back (assignment);
+                    }
+                }
+
+                track.rack.macros.push_back (std::move (macro));
+            }
+        }
+    }
+
     return track;
 }
 
@@ -503,6 +564,57 @@ SynthPatch synthFromJson (const json& node)
     return patch;
 }
 
+json effectSlotToJson (const EffectSlot& effect)
+{
+    return json {
+        { "bypass", effect.bypass },
+        { "kind", effectName (effect.kind) },
+        { "p0", effect.p0 },
+        { "p1", effect.p1 },
+        { "p2", effect.p2 },
+        { "p3", effect.p3 },
+        { "p4", effect.p4 },
+        { "p5", effect.p5 }
+    };
+}
+
+json rackToJson (const DeviceRack& rack)
+{
+    json chains = json::array();
+
+    for (const auto& chain : rack.chains)
+    {
+        json effects = json::array();
+
+        for (const auto& effect : chain.effects)
+            effects.push_back (effectSlotToJson (effect));
+
+        chains.push_back (json { { "effects", std::move (effects) }, { "gain", chain.gain }, { "name", chain.name } });
+    }
+
+    json macros = json::array();
+
+    for (const auto& macro : rack.macros)
+    {
+        json assignments = json::array();
+
+        for (const auto& assignment : macro.assignments)
+        {
+            assignments.push_back (json {
+                { "chain", assignment.chain },
+                { "effect", assignment.effect },
+                { "maximum", assignment.maximum },
+                { "minimum", assignment.minimum },
+                { "parameter", assignment.parameter }
+            });
+        }
+
+        macros.push_back (json { { "assignments", std::move (assignments) }, { "name", macro.name }, { "value", macro.value } });
+    }
+
+    return json { { "chains", std::move (chains) }, { "macros", std::move (macros) } };
+}
+
 json trackToJson (const Track& track)
 {
     json clips = json::array();
@@ -555,6 +667,7 @@ json trackToJson (const Track& track)
     }
 
     trackJson["effects"] = std::move (effects);
+    trackJson["rack"] = rackToJson (track.rack);
     const char* instrument = "synth";
 
     if (track.instrument == InstrumentKind::Sampler)

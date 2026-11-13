@@ -190,6 +190,8 @@ private:
     std::vector<float> scratchRight_;
     std::vector<float> routeStorage_;
     std::unique_ptr<EffectState[]> effectArena_;
+    std::unique_ptr<EffectState[]> rackStates_;
+    std::vector<float> rackScratch_;
     BlockScratch blockScratch_ {};
     int scratchFrames_ = 0;
 

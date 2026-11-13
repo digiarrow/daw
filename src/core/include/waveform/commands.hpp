@@ -422,6 +422,21 @@ private:
     bool applied_ = false;
 };
 
+class SetRackCommand : public EditCommand
+{
+public:
+    SetRackCommand (std::string trackId, DeviceRack rack);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    DeviceRack next_;
+    DeviceRack previous_;
+    bool applied_ = false;
+};
+
 class SetPluginCommand : public EditCommand
 {
 public:

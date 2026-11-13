@@ -811,6 +811,16 @@ void DeviceEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
         effectArena_.reset (new EffectState[static_cast<std::size_t> (kMaxRouteTracks * kMaxInserts)] {});
 
     bindBlockScratch (blockScratch_, routeStorage_.data(), scratch, effectArena_.get());
+    rackScratch_.assign (static_cast<std::size_t> (scratch * 4), 0.0f);
+    blockScratch_.rackScratchLeft = rackScratch_.data();
+    blockScratch_.rackScratchRight = rackScratch_.data() + scratch;
+    blockScratch_.rackOutLeft = rackScratch_.data() + scratch * 2;
+    blockScratch_.rackOutRight = rackScratch_.data() + scratch * 3;
+
+    if (rackStates_ == nullptr)
+        rackStates_.reset (new EffectState[static_cast<std::size_t> (8 * 4 * kMaxInserts)] {});
+
+    blockScratch_.rackStates = rackStates_.get();
     plugins_.prepare (transport_.sampleRate(), scratch);
     midiCollector_.reset (transport_.sampleRate());
     longDelayCapacity_ = std::max (8192, static_cast<int> (transport_.sampleRate() * 4.0));
