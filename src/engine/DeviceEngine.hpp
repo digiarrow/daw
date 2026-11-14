@@ -108,7 +108,9 @@ public:
     bool seekQuarterNotes (double quarterNotes);
 
     /// `scene` of -1 returns the track to the arrangement. `quantize` is 0 now, 1 next beat, 2 next bar.
-    bool launchSession (int trackIndex, int scene, int quantize);
+    bool launchSession (int trackIndex, int scene, int quantize, int mode = 0, int follow = 0, int afterHundredths = 400, int repeatHundredths = 100);
+    /// Plays a short stereo buffer through the open device. Message thread only.
+    void playPreview (std::vector<float> left, std::vector<float> right);
     [[nodiscard]] int sessionScene (int trackIndex) const noexcept;
     [[nodiscard]] int sessionPending (int trackIndex) const noexcept;
     [[nodiscard]] int controlEpoch() const noexcept;
@@ -228,6 +230,12 @@ private:
     std::atomic<std::int32_t> publishedStartMicro_ { 0 };
     std::atomic<int> publishedTrack_ { -1 };
     std::atomic<int> publishedMidi_ { 0 };
+    double sceneTempoApplied_ = 0.0;
+    double tempoBeforeScene_ = 0.0;
+    std::vector<float> previewLeft_;
+    std::vector<float> previewRight_;
+    std::atomic<int> previewFrames_ { 0 };
+    std::atomic<int> previewCursor_ { 0 };
 
     struct IncomingMidi
     {

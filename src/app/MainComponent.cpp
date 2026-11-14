@@ -10,6 +10,8 @@
 #include "StudioLookAndFeel.hpp"
 #include "waveform/paths.hpp"
 #include "waveform/serialize.hpp"
+#include "waveform/session.hpp"
+#include "waveform/stretch.hpp"
 #include "waveform/timing.hpp"
 #include "waveform/version.hpp"
 
@@ -493,6 +495,24 @@ MainComponent::MainComponent()
     arrangement_.onMoveClip = [this] (const std::string& trackId, const std::string& clipId, double start) { moveClip (trackId, clipId, start); };
     arrangement_.onResizeClip = [this] (const std::string& trackId, const std::string& clipId, double start, double length) { resizeClip (trackId, clipId, start, length); };
     arrangement_.onFadeClip = [this] (const std::string& trackId, const std::string& clipId, double fadeIn, double fadeOut) { fadeClip (trackId, clipId, fadeIn, fadeOut); };
+    arrangement_.setAutomationParameter (automationParameter_);
+    browser_.onPreview = [this] (const juce::String& path)
+    {
+        std::string error;
+        const double rate = engine_.playbackInfo().sampleRate > 0 ? engine_.playbackInfo().sampleRate : 48000.0;
+        const auto audio = engine_.library().load (path.toStdString(), rate, error);
+
+        if (audio == nullptr)
+        {
+            setStatus (error.empty() ? "Cannot preview that file." : juce::String (error));
+            return;
+        }
+
+        const int frames = static_cast<int> (std::min<std::int64_t> (audio->frames(), static_cast<std::int64_t> (rate * 8.0)));
+        engine_.playPreview (std::vector<float> (audio->left.begin(), audio->left.begin() + frames),
+                             std::vector<float> (audio->right.begin(), audio->right.begin() + frames));
+        setStatus ("Previewing " + juce::File (path).getFileName() + ".");
+    };
     midiEffectBar_.onChange = [this] (std::vector<waveform::MidiEffect> effects) { setMidiEffects (std::move (effects)); };
     midiEffectBar_.importButton().onClick = [this] { importMidi(); };
     midiEffectBar_.exportButton().onClick = [this] { exportMidi(); };
@@ -507,7 +527,7 @@ MainComponent::MainComponent()
     };
     arrangement_.onAutomation = [this] (const std::string& trackId, std::vector<waveform::AutomationPoint> points)
     {
-        history_.execute (project_, std::make_unique<waveform::SetAutomationCommand> (trackId, "mixer.gainDb", std::move (points)));
+        history_.execute (project_, std::make_unique<waveform::SetAutomationCommand> (trackId, automationParameter_, std::move (points)));
         syncEngine();
         refreshHistoryButtons();
     };
@@ -605,7 +625,26 @@ MainComponent::MainComponent()
     session_.onLaunch = [this] (int track, int scene)
     {
         const int quantize = std::max (0, launchBox_.getSelectedId() - 1);
-        engine_.launchSession (track, scene, quantize);
+        int mode = 0;
+        int follow = 0;
+        int after = 400;
+        int repeat = 100;
+
+        if (track >= 0 && track < static_cast<int> (project_.tracks.size()))
+        {
+            for (const auto& slot : project_.tracks[static_cast<std::size_t> (track)].session)
+            {
+                if (slot.scene != scene)
+                    continue;
+
+                mode = static_cast<int> (slot.launch);
+                follow = static_cast<int> (slot.follow);
+                after = static_cast<int> (std::lround (slot.followAfterQuarters * 100.0));
+                repeat = static_cast<int> (std::lround (slot.repeatQuarters * 100.0));
+            }
+        }
+
+        engine_.launchSession (track, scene, quantize, mode, follow, after, repeat);
         setStatus (quantize == 0 ? "Scene launched." : quantize == 1 ? "Scene waits for the next beat." : "Scene waits for the next bar.");
     };
     session_.onLaunchScene = [this] (int scene)
@@ -679,6 +718,7 @@ MainComponent::MainComponent()
             if (slot.scene == scene)
                 selectedClipId_ = waveform::clipId (slot.clip);
 
+        selectedScene_ = scene;
         rebuildSelection();
         refreshPiano();
     };
@@ -1161,6 +1201,72 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         return true;
     }
 
+    if (key == juce::KeyPress ('w', 0, 0))
+    {
+        if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+            if (focused->findParentComponentOfClass<juce::TextEditor>() != nullptr)
+                return false;
+
+        auto* track = selectedTrack();
+        const waveform::AudioClip* audio = nullptr;
+
+        if (track != nullptr)
+            for (const auto& clip : track->clips)
+                if (const auto* candidate = std::get_if<waveform::AudioClip> (&clip); candidate != nullptr && candidate->id == selectedClipId_)
+                    audio = candidate;
+
+        if (audio == nullptr)
+        {
+            setStatus ("Select an audio clip to auto-warp.");
+            return true;
+        }
+
+        std::string error;
+        const double rate = engine_.playbackInfo().sampleRate > 0 ? engine_.playbackInfo().sampleRate : 48000.0;
+        const auto loaded = engine_.library().load (audio->file, rate, error);
+
+        if (loaded == nullptr || loaded->left.empty())
+        {
+            setStatus (error.empty() ? "Cannot read the clip for auto-warp." : juce::String (error));
+            return true;
+        }
+
+        const double tempo = waveform::detectTempoBpm (loaded->left.data(), loaded->frames(), loaded->sampleRate);
+        const double seconds = loaded->sampleRate > 0.0 ? static_cast<double> (loaded->frames()) / loaded->sampleRate : 0.0;
+        auto markers = waveform::autoWarpMarkers (seconds, tempo > 0.0 ? tempo : project_.tempoBpm);
+        history_.execute (project_, std::make_unique<waveform::SetClipMarkersCommand> (track->id, audio->id, std::move (markers), audio->comp));
+
+        if (auto* edited = waveform::findTrack (project_, track->id))
+            for (auto& clip : edited->clips)
+                if (auto* concrete = std::get_if<waveform::AudioClip> (&clip); concrete != nullptr && concrete->id == selectedClipId_)
+                    concrete->warpMode = static_cast<int> (waveform::WarpMode::Beats);
+
+        syncEngine();
+        refreshHistoryButtons();
+        setStatus ("Auto-warp estimated " + juce::String (tempo, 1) + " BPM and set beats mode.");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('v', 0, 0))
+    {
+        if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+            if (focused->findParentComponentOfClass<juce::TextEditor>() != nullptr)
+                return false;
+
+        if (automationParameter_ == "mixer.gainDb")
+            automationParameter_ = "mixer.pan";
+        else if (automationParameter_ == "mixer.pan")
+            automationParameter_ = "synth.cutoffHz";
+        else if (automationParameter_ == "synth.cutoffHz")
+            automationParameter_ = "effect.0.p0";
+        else
+            automationParameter_ = "mixer.gainDb";
+
+        arrangement_.setAutomationParameter (automationParameter_);
+        setStatus ("Automation lane: " + juce::String (automationParameter_));
+        return true;
+    }
+
     if (key == juce::KeyPress ('x', 0, 0))
     {
         if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
@@ -1510,7 +1616,7 @@ void MainComponent::redo()
 
 void MainComponent::chooseAudioFile()
 {
-    fileChooser_ = std::make_unique<juce::FileChooser> ("Add an audio file", juce::File(), "*.wav;*.aiff;*.aif;*.flac;*.ogg");
+    fileChooser_ = std::make_unique<juce::FileChooser> ("Add an audio file", juce::File(), "*.wav;*.aiff;*.aif;*.flac;*.ogg;*.mp3");
     fileChooser_->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                                [this] (const juce::FileChooser& chooser)
                                {
@@ -2159,6 +2265,23 @@ void MainComponent::commitTake()
         }
 
         clip.lengthQuarterNotes = end + 0.25;
+
+        if (session_.isVisible() && selectedScene_ >= 0)
+        {
+            auto& destination = project_.tracks[static_cast<std::size_t> (midi.trackIndex)];
+            waveform::recordIntoSessionSlot (destination, selectedScene_, clip);
+
+            for (const auto& slot : destination.session)
+                if (slot.scene == selectedScene_)
+                    selectedClipId_ = waveform::clipId (slot.clip);
+            syncEngine();
+            rebuildTracks();
+            refreshHistoryButtons();
+            refreshPiano();
+            setStatus ("Recorded into the session slot.");
+            return;
+        }
+
         auto command = std::make_unique<waveform::AddMidiClipCommand> (project_.tracks[static_cast<std::size_t> (midi.trackIndex)].id, std::move (clip));
         selectedTrackId_ = project_.tracks[static_cast<std::size_t> (midi.trackIndex)].id;
         selectedClipId_ = command->clipId();

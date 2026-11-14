@@ -117,4 +117,99 @@ int appendSessionNotes (const SessionNoteView* notes,
     return destinationCount;
 }
 
+LaunchResult stepClipLaunch (LaunchStep step, int sceneCount, double blockQuarters, bool pressed, bool released) noexcept
+{
+    LaunchResult result;
+    result.activeScene = step.activeScene;
+    result.playheadQuarters = step.playheadQuarters;
+    result.gateHeld = step.gateHeld;
+    const int scenes = std::max (1, sceneCount);
+    const int requested = std::clamp (step.pressedScene, 0, scenes - 1);
+
+    if (pressed)
+    {
+        if (step.launch == ClipLaunchMode::Toggle && step.activeScene == requested)
+        {
+            result.activeScene = -1;
+            result.playheadQuarters = 0.0;
+            result.retrigger = false;
+            result.gateHeld = false;
+            return result;
+        }
+
+        result.activeScene = requested;
+        result.playheadQuarters = 0.0;
+        result.retrigger = true;
+        result.gateHeld = step.launch == ClipLaunchMode::Gate;
+        return result;
+    }
+
+    if (released && step.launch == ClipLaunchMode::Gate && step.gateHeld)
+    {
+        result.activeScene = -1;
+        result.playheadQuarters = 0.0;
+        result.gateHeld = false;
+        return result;
+    }
+
+    if (result.activeScene < 0)
+        return result;
+
+    result.playheadQuarters += std::max (0.0, blockQuarters);
+
+    if (step.launch == ClipLaunchMode::Repeat && step.repeatQuarters > 0.0 && result.playheadQuarters >= step.repeatQuarters)
+    {
+        result.playheadQuarters = std::fmod (result.playheadQuarters, step.repeatQuarters);
+        result.retrigger = true;
+    }
+
+    if (step.follow != FollowActionKind::None && step.followAfterQuarters > 0.0 && result.playheadQuarters >= step.followAfterQuarters)
+    {
+        const int current = result.activeScene;
+
+        switch (step.follow)
+        {
+            case FollowActionKind::Stop: result.activeScene = -1; break;
+            case FollowActionKind::Next: result.activeScene = (current + 1) % scenes; break;
+            case FollowActionKind::Previous: result.activeScene = (current + scenes - 1) % scenes; break;
+            case FollowActionKind::First: result.activeScene = 0; break;
+            case FollowActionKind::Last: result.activeScene = scenes - 1; break;
+            case FollowActionKind::None: break;
+        }
+
+        result.playheadQuarters = 0.0;
+        result.retrigger = result.activeScene >= 0;
+    }
+
+    return result;
+}
+
+double tempoForScene (const double* sceneTempoBpm, int sceneCount, int activeScene, double projectTempo) noexcept
+{
+    if (sceneTempoBpm == nullptr || activeScene < 0 || activeScene >= sceneCount)
+        return projectTempo;
+
+    const double tempo = sceneTempoBpm[activeScene];
+    return tempo > 0.0 ? tempo : projectTempo;
+}
+
+void recordIntoSessionSlot (Track& track, int scene, Clip clip)
+{
+    const int row = std::clamp (scene, 0, kSessionScenes - 1);
+
+    for (auto& slot : track.session)
+    {
+        if (slot.scene != row)
+            continue;
+
+        slot.clip = std::move (clip);
+        return;
+    }
+
+    SessionSlot slot;
+    slot.scene = row;
+    slot.clip = std::move (clip);
+    track.session.push_back (std::move (slot));
+}
+
 } // namespace waveform

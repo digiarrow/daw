@@ -104,7 +104,7 @@ void appendCopy (const float* left, const float* right, int frames, std::vector<
     outRight.insert (outRight.end(), right, right + frames);
 }
 
-void appendStretch (const float* inLeft, const float* inRight, int inputFrames, int outputFrames, double, std::vector<float>& outLeft, std::vector<float>& outRight)
+void appendStretch (const float* inLeft, const float* inRight, int inputFrames, int outputFrames, WarpMode mode, std::vector<float>& outLeft, std::vector<float>& outRight)
 {
     if (inputFrames <= 0 || outputFrames <= 0)
         return;
@@ -124,9 +124,8 @@ void appendStretch (const float* inLeft, const float* inRight, int inputFrames, 
     }
 
     signalsmith::stretch::SignalsmithStretch<float> stretch (42);
-    const int block = std::clamp (std::min (inputFrames, outputFrames) / 3, 128, 2048);
-    const int interval = std::max (32, block / 4);
-    stretch.configure (2, block, interval, false);
+    const auto settings = warpRenderSettings (mode, inputFrames, outputFrames);
+    stretch.configure (2, settings.block, settings.interval, false);
     const float* inputs[] = { inLeft, inRight };
     std::vector<float> stretchedLeft (static_cast<std::size_t> (outputFrames));
     std::vector<float> stretchedRight (static_cast<std::size_t> (outputFrames));
@@ -156,7 +155,8 @@ void renderStretch (const StretchSource& primary,
                     double offsetSeconds,
                     double lengthSeconds,
                     std::vector<float>& left,
-                    std::vector<float>& right)
+                    std::vector<float>& right,
+                    WarpMode mode)
 {
     left.clear();
     right.clear();
@@ -192,8 +192,92 @@ void renderStretch (const StretchSource& primary,
         }
 
         std::vector<float> sliceRight (inRight + first, inRight + first + count);
-        appendStretch (source->left + first, sliceRight.data(), count, piece.outputFrames, sampleRate, left, right);
+        appendStretch (source->left + first, sliceRight.data(), count, piece.outputFrames, mode, left, right);
     }
+}
+
+WarpRenderSettings warpRenderSettings (WarpMode mode, int inputFrames, int outputFrames) noexcept
+{
+    const int span = std::max (1, std::min (inputFrames, outputFrames));
+    WarpRenderSettings settings;
+
+    switch (mode)
+    {
+        case WarpMode::Beats:
+            settings.block = std::clamp (span / 8, 128, 512);
+            settings.interval = std::max (32, settings.block / 8);
+            break;
+        case WarpMode::Tones:
+            settings.block = std::clamp (span / 2, 512, 4096);
+            settings.interval = std::max (64, settings.block / 2);
+            break;
+        case WarpMode::Complex:
+            settings.block = std::clamp (span / 3, 128, 2048);
+            settings.interval = std::max (32, settings.block / 4);
+            break;
+    }
+
+    return settings;
+}
+
+double detectTempoBpm (const float* samples, std::int64_t frames, double sampleRate) noexcept
+{
+    if (samples == nullptr || ! (sampleRate > 0.0) || frames < static_cast<std::int64_t> (sampleRate))
+        return 0.0;
+
+    constexpr int kHop = 512;
+    constexpr int kMinBpm = 60;
+    constexpr int kMaxBpm = 180;
+    float energy[512];
+    int bins = 0;
+
+    for (std::int64_t start = 0; start + kHop <= frames && bins < 512; start += kHop)
+    {
+        float sum = 0.0f;
+
+        for (int index = 0; index < kHop; ++index)
+            sum += std::abs (samples[start + index]);
+
+        energy[bins++] = sum;
+    }
+
+    if (bins < 16)
+        return 0.0;
+
+    const double framesPerBin = static_cast<double> (kHop);
+    int bestLag = 1;
+    float best = 0.0f;
+    const int minLag = std::max (1, static_cast<int> (sampleRate * 60.0 / kMaxBpm / framesPerBin));
+    const int maxLag = std::min (bins - 2, static_cast<int> (sampleRate * 60.0 / kMinBpm / framesPerBin));
+
+    for (int lag = minLag; lag <= maxLag; ++lag)
+    {
+        float score = 0.0f;
+
+        for (int index = 0; index + lag < bins; ++index)
+            score += energy[index] * energy[index + lag];
+
+        if (score > best)
+        {
+            best = score;
+            bestLag = lag;
+        }
+    }
+
+    const double seconds = static_cast<double> (bestLag) * framesPerBin / sampleRate;
+    return seconds > 0.0 ? 60.0 / seconds : 0.0;
+}
+
+std::vector<WarpMarker> autoWarpMarkers (double fileSeconds, double detectedBpm) noexcept
+{
+    std::vector<WarpMarker> markers;
+
+    if (! (fileSeconds > 0.0) || ! (detectedBpm > 0.0))
+        return markers;
+
+    markers.push_back (WarpMarker { 0.0, 0.0 });
+    markers.push_back (WarpMarker { fileSeconds, fileSeconds * detectedBpm / 60.0 });
+    return markers;
 }
 
 } // namespace waveform

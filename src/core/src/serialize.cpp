@@ -99,9 +99,28 @@ json warpToJson (const std::vector<WarpMarker>& markers);
 json takesToJson (const std::vector<ClipTake>& takes);
 json compToJson (const std::vector<CompSegment>& segments);
 
+json envelopeToJson (const std::vector<AutomationPoint>& points)
+{
+    json values = json::array();
+
+    for (const auto& point : points)
+        values.push_back (json { { "position", point.quarterNotes }, { "value", point.value } });
+
+    return values;
+}
+
+void envelopeFromJson (const json& node, std::vector<AutomationPoint>& points)
+{
+    if (! node.contains ("envelope") || ! node.at ("envelope").is_array())
+        return;
+
+    for (const auto& point : node.at ("envelope"))
+        points.push_back (AutomationPoint { requireNumber (point, "position"), requireNumber (point, "value") });
+}
+
 json audioClipToJson (const AudioClip& clip)
 {
-    return json {
+    json value = {
         { "fadeIn", clip.fadeInSeconds },
         { "fadeOut", clip.fadeOutSeconds },
         { "file", clip.file },
@@ -116,6 +135,14 @@ json audioClipToJson (const AudioClip& clip)
         { "type", "audio" },
         { "warp", warpToJson (clip.warp) }
     };
+
+    if (! clip.envelope.empty())
+        value["envelope"] = envelopeToJson (clip.envelope);
+
+    if (clip.warpMode != 2)
+        value["warpMode"] = clip.warpMode;
+
+    return value;
 }
 
 json takesToJson (const std::vector<ClipTake>& takes)
@@ -164,7 +191,7 @@ json midiClipToJson (const MidiClip& clip)
         });
     }
 
-    return json {
+    json value = {
         { "id", clip.id },
         { "lengthQuarterNotes", clip.lengthQuarterNotes },
         { "name", clip.name },
@@ -172,6 +199,11 @@ json midiClipToJson (const MidiClip& clip)
         { "startQuarterNotes", clip.startQuarterNotes },
         { "type", "midi" }
     };
+
+    if (! clip.envelope.empty())
+        value["envelope"] = envelopeToJson (clip.envelope);
+
+    return value;
 }
 
 json clipToJson (const Clip& clip)
@@ -241,6 +273,11 @@ AudioClip audioClipFromJson (const json& node, std::unordered_set<std::string>& 
         for (const auto& segment : node.at ("comp"))
             clip.comp.push_back (CompSegment { requireNumber (segment, "start"), requireNumber (segment, "end"), requireInt (segment, "take") });
 
+    envelopeFromJson (node, clip.envelope);
+
+    if (node.contains ("warpMode"))
+        clip.warpMode = std::clamp (requireInt (node, "warpMode"), 0, 2);
+
     return clip;
 }
 
@@ -296,6 +333,7 @@ MidiClip midiClipFromJson (const json& node, std::unordered_set<std::string>& id
     for (const auto& note : node.at ("notes"))
         clip.notes.push_back (noteFromJson (note, clip.id));
 
+    envelopeFromJson (node, clip.envelope);
     return clip;
 }
 
@@ -362,6 +400,19 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
                 fail ("session slot is missing a clip");
 
             slot.clip = clipFromJson (slotNode.at ("clip"), track.type, ids);
+
+            if (slotNode.contains ("launch"))
+                slot.launch = static_cast<ClipLaunchMode> (std::clamp (requireInt (slotNode, "launch"), 0, 3));
+
+            if (slotNode.contains ("follow"))
+                slot.follow = static_cast<FollowActionKind> (std::clamp (requireInt (slotNode, "follow"), 0, 5));
+
+            if (slotNode.contains ("followAfter"))
+                slot.followAfterQuarters = requireNumber (slotNode, "followAfter");
+
+            if (slotNode.contains ("repeat"))
+                slot.repeatQuarters = requireNumber (slotNode, "repeat");
+
             track.session.push_back (std::move (slot));
         }
     }
@@ -493,6 +544,49 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
                     lane.points.push_back (AutomationPoint { requireNumber (pointNode, "quarterNotes"), requireNumber (pointNode, "value") });
 
             track.automation.push_back (std::move (lane));
+        }
+    }
+
+    if (node.contains ("sidechain"))
+        track.sidechainTrack = requireInt (node, "sidechain");
+
+    if (node.contains ("drumRack") && node.at ("drumRack").is_array())
+    {
+        track.drumRack.count = 0;
+
+        for (const auto& padNode : node.at ("drumRack"))
+        {
+            if (track.drumRack.count >= kMaxDrumPads)
+                break;
+
+            auto& pad = track.drumRack.pads[track.drumRack.count];
+            pad.note = std::clamp (requireInt (padNode, "note"), 0, 127);
+            pad.chokeGroup = std::max (0, requireInt (padNode, "choke"));
+            pad.gain = static_cast<float> (requireNumber (padNode, "gain"));
+            pad.tuneSemitones = static_cast<float> (requireNumber (padNode, "tune"));
+            pad.chainLength = 0;
+
+            if (padNode.contains ("chain") && padNode.at ("chain").is_array())
+            {
+                for (const auto& effectNode : padNode.at ("chain"))
+                {
+                    if (pad.chainLength >= 2)
+                        break;
+
+                    auto& effect = pad.chain[pad.chainLength];
+                    effect.kind = effectFromName (requireString (effectNode, "kind").c_str());
+                    effect.bypass = requireBool (effectNode, "bypass");
+                    effect.p0 = requireNumber (effectNode, "p0");
+                    effect.p1 = requireNumber (effectNode, "p1");
+                    effect.p2 = requireNumber (effectNode, "p2");
+                    effect.p3 = requireNumber (effectNode, "p3");
+                    effect.p4 = requireNumber (effectNode, "p4");
+                    effect.p5 = requireNumber (effectNode, "p5");
+                    ++pad.chainLength;
+                }
+            }
+
+            ++track.drumRack.count;
         }
     }
 
@@ -735,7 +829,23 @@ json trackToJson (const Track& track)
     json session = json::array();
 
     for (const auto& slot : track.session)
-        session.push_back (json { { "clip", clipToJson (slot.clip) }, { "scene", slot.scene } });
+    {
+        json slotJson = { { "clip", clipToJson (slot.clip) }, { "scene", slot.scene } };
+
+        if (slot.launch != ClipLaunchMode::Trigger)
+            slotJson["launch"] = static_cast<int> (slot.launch);
+
+        if (slot.follow != FollowActionKind::None)
+            slotJson["follow"] = static_cast<int> (slot.follow);
+
+        if (slot.followAfterQuarters != 4.0)
+            slotJson["followAfter"] = slot.followAfterQuarters;
+
+        if (slot.repeatQuarters != 1.0)
+            slotJson["repeat"] = slot.repeatQuarters;
+
+        session.push_back (std::move (slotJson));
+    }
 
     json trackJson = {
         { "clips", std::move (clips) },
@@ -823,6 +933,46 @@ json trackToJson (const Track& track)
     }
 
     trackJson["automation"] = std::move (lanes);
+
+    if (track.sidechainTrack >= 0)
+        trackJson["sidechain"] = track.sidechainTrack;
+
+    if (track.drumRack.count > 0)
+    {
+        json pads = json::array();
+
+        for (int index = 0; index < track.drumRack.count && index < kMaxDrumPads; ++index)
+        {
+            const auto& pad = track.drumRack.pads[index];
+            json chain = json::array();
+
+            for (int slot = 0; slot < pad.chainLength && slot < 2; ++slot)
+            {
+                const auto& effect = pad.chain[slot];
+                chain.push_back (json {
+                    { "bypass", effect.bypass },
+                    { "kind", effectName (effect.kind) },
+                    { "p0", effect.p0 },
+                    { "p1", effect.p1 },
+                    { "p2", effect.p2 },
+                    { "p3", effect.p3 },
+                    { "p4", effect.p4 },
+                    { "p5", effect.p5 }
+                });
+            }
+
+            pads.push_back (json {
+                { "chain", std::move (chain) },
+                { "choke", pad.chokeGroup },
+                { "gain", pad.gain },
+                { "note", pad.note },
+                { "tune", pad.tuneSemitones }
+            });
+        }
+
+        trackJson["drumRack"] = std::move (pads);
+    }
+
     return trackJson;
 }
 
@@ -853,6 +1003,21 @@ std::string projectToJson (const Project& project)
         { "version", kProjectFormatVersion },
         { "countInBars", project.countInBars }
     };
+
+    bool customSceneTempo = false;
+
+    for (double tempo : project.sceneTempoBpm)
+        customSceneTempo = customSceneTempo || tempo > 0.0;
+
+    if (customSceneTempo)
+    {
+        json tempos = json::array();
+
+        for (double tempo : project.sceneTempoBpm)
+            tempos.push_back (tempo);
+
+        document["sceneTempo"] = std::move (tempos);
+    }
 
     return document.dump (2) + '\n';
 }
@@ -908,6 +1073,23 @@ std::optional<Project> projectFromJson (std::string_view text, std::string* erro
 
         if (document.contains ("countInBars"))
             project.countInBars = std::clamp (requireInt (document, "countInBars"), 0, 8);
+
+        if (document.contains ("sceneTempo") && document.at ("sceneTempo").is_array())
+        {
+            int index = 0;
+
+            for (const auto& tempo : document.at ("sceneTempo"))
+            {
+                if (index >= kSessionScenes)
+                    break;
+
+                if (! tempo.is_number())
+                    fail ("scene tempo must be a number");
+
+                project.sceneTempoBpm[index] = tempo.get<double>() > 0.0 ? Timing::clampBpm (tempo.get<double>()) : 0.0;
+                ++index;
+            }
+        }
 
         if (! document.contains ("tracks") || ! document.at ("tracks").is_array())
             fail ("tracks must be an array");

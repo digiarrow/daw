@@ -1,13 +1,14 @@
 #include "BrowserPanel.hpp"
 
 #include "StudioLookAndFeel.hpp"
+#include "waveform/media.hpp"
 
 namespace
 {
 
 bool isAudio (const juce::File& file)
 {
-    return file.hasFileExtension ("wav;aif;aiff;flac;ogg");
+    return waveform::isImportableAudioExtension (file.getFileExtension().toStdString());
 }
 
 } // namespace
@@ -15,8 +16,8 @@ bool isAudio (const juce::File& file)
 class BrowserPanel::Row : public juce::Component
 {
 public:
-    explicit Row (juce::File file)
-        : file_ (std::move (file))
+    Row (juce::File file, std::function<void (const juce::String&)> preview)
+        : file_ (std::move (file)), preview_ (std::move (preview))
     {
     }
 
@@ -43,10 +44,17 @@ public:
         }
     }
 
-    void mouseUp (const juce::MouseEvent&) override { dragging_ = false; }
+    void mouseUp (const juce::MouseEvent& event) override
+    {
+        if (! dragging_ && event.getDistanceFromDragStart() < 6 && preview_)
+            preview_ (file_.getFullPathName());
+
+        dragging_ = false;
+    }
 
 private:
     juce::File file_;
+    std::function<void (const juce::String&)> preview_;
     bool hover_ = false;
     bool dragging_ = false;
 };
@@ -93,7 +101,7 @@ void BrowserPanel::rebuild()
             if (! isAudio (file))
                 continue;
 
-            auto row = std::make_unique<Row> (file);
+            auto row = std::make_unique<Row> (file, onPreview);
             list_.addAndMakeVisible (row.get());
             rows_.push_back (std::move (row));
         }

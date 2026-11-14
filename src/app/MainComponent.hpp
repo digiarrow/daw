@@ -199,6 +199,8 @@ private:
 
     std::string selectedTrackId_;
     std::string selectedClipId_;
+    std::string automationParameter_ { "mixer.gainDb" };
+    int selectedScene_ = -1;
     std::string peakSignature_;
     std::unordered_map<std::string, std::vector<float>> clipPeaks_;
     bool showSession_ = false;

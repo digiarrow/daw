@@ -49,6 +49,40 @@ struct SessionVoice
     int pending = -2;                ///< -2 means nothing is waiting.
     std::int64_t pendingSample = 0;  ///< Timeline sample where `pending` becomes active.
     std::int64_t playhead = 0;       ///< Samples into the looping clip.
+    ClipLaunchMode launch = ClipLaunchMode::Trigger;
+    FollowActionKind follow = FollowActionKind::None;
+    double followAfterQuarters = 4.0;
+    double repeatQuarters = 1.0;
+    bool gateHeld = false;
 };
+
+struct LaunchStep
+{
+    int activeScene = -1;
+    double playheadQuarters = 0.0;
+    bool gateHeld = false;
+    ClipLaunchMode launch = ClipLaunchMode::Trigger;
+    FollowActionKind follow = FollowActionKind::None;
+    double followAfterQuarters = 4.0;
+    double repeatQuarters = 1.0;
+    int pressedScene = 0;
+};
+
+struct LaunchResult
+{
+    int activeScene = -1;
+    double playheadQuarters = 0.0;
+    bool retrigger = false;
+    bool gateHeld = false;
+};
+
+/// One block of session-launch policy: trigger, gate, toggle, repeat, and follow actions.
+[[nodiscard]] LaunchResult stepClipLaunch (LaunchStep step, int sceneCount, double blockQuarters, bool pressed, bool released) noexcept;
+
+/// Scene tempo, or the project tempo when the scene has no override.
+[[nodiscard]] double tempoForScene (const double* sceneTempoBpm, int sceneCount, int activeScene, double projectTempo) noexcept;
+
+/// Replaces or creates the clip in a session slot. Arrangement clips are left alone.
+void recordIntoSessionSlot (Track& track, int scene, Clip clip);
 
 } // namespace waveform

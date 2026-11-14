@@ -58,8 +58,24 @@ struct EffectState
 void resetEffect (EffectState& state) noexcept;
 
 /// In-place stereo processing. Does not allocate.
-void processEffect (const EffectSlot& slot, EffectState& state, float* left, float* right, int frames, double sampleRate) noexcept;
+/// For a compressor, `sidechainLeft`/`sidechainRight` replace the detector when both are set.
+void processEffect (const EffectSlot& slot,
+                    EffectState& state,
+                    float* left,
+                    float* right,
+                    int frames,
+                    double sampleRate,
+                    const float* sidechainLeft = nullptr,
+                    const float* sidechainRight = nullptr) noexcept;
 
-void processInserts (const EffectSlot* slots, int slotCount, EffectState* states, float* left, float* right, int frames, double sampleRate) noexcept;
+void processInserts (const EffectSlot* slots,
+                     int slotCount,
+                     EffectState* states,
+                     float* left,
+                     float* right,
+                     int frames,
+                     double sampleRate,
+                     const float* sidechainLeft = nullptr,
+                     const float* sidechainRight = nullptr) noexcept;
 
 } // namespace waveform

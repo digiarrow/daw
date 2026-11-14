@@ -25,6 +25,9 @@ struct RenderClip
     double lengthSeconds = 0.0;
     double fadeInSeconds = 0.0;
     double fadeOutSeconds = 0.0;
+    double envelopePosition[8] {};
+    double envelopeValue[8] {};
+    int envelopeCount = 0;
     float gain = 1.0f;
 };
 
@@ -85,6 +88,8 @@ struct RenderTrack
     std::vector<RenderSamplerZone> zones;
     std::vector<AutomationLane> automation;
     std::vector<MidiEffect> midiEffects;
+    DrumRack drumRack;
+    int sidechainTrack = -1;
     float gain = 1.0f;
     float gainDb = 0.0f;
     float pan = 0.0f;
@@ -156,6 +161,8 @@ struct RenderGraph
 {
     std::vector<RenderTrack> tracks;
     float masterGain = 1.0f;
+    double projectTempo = 120.0;
+    double sceneTempoBpm[kSessionScenes] {};
 };
 
 struct GraphBuildResult

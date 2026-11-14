@@ -14,6 +14,7 @@ public:
     [[nodiscard]] const juce::File& folder() const noexcept { return folder_; }
 
     std::function<void()> onChooseFolder;
+    std::function<void (const juce::String& path)> onPreview;
 
     void resized() override;
     void paint (juce::Graphics& graphics) override;

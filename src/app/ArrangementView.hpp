@@ -26,6 +26,7 @@ public:
     std::function<void (const std::string& trackId, const std::string& clipId, double startQuarterNotes, double lengthQuarterNotes)> onResizeClip;
     std::function<void (const std::string& trackId, const std::string& clipId, double fadeInSeconds, double fadeOutSeconds)> onFadeClip;
     void setClipPeaks (std::unordered_map<std::string, std::vector<float>> peaks);
+    void setAutomationParameter (std::string parameter);
     std::function<void (const std::string& trackId, double startQuarterNotes)> onCreateMidiClip;
     std::function<void (double quarterNotes)> onSeek;
     std::function<void (bool enabled, double startQuarterNotes, double endQuarterNotes)> onLoopEdit;
@@ -80,6 +81,7 @@ private:
     std::string selectedClipId_;
     std::string armedTrackId_;
     std::string automationTrackId_;
+    std::string automationParameter_ { "mixer.gainDb" };
     bool showAutomation_ = false;
     bool draggingPoint_ = false;
     int dragPoint_ = -1;
