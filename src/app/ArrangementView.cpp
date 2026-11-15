@@ -90,6 +90,58 @@ float ArrangementView::xForQuarter (double quarterNotes) const
     return static_cast<float> (kNames) + static_cast<float> ((quarterNotes - scroll_) * kPixelsPerQuarter);
 }
 
+ArrangementView::EnvelopeMap ArrangementView::selectedEnvelope() const
+{
+    EnvelopeMap map;
+
+    if (project_ == nullptr || selectedClipId_.empty())
+        return map;
+
+    for (const auto& track : project_->tracks)
+    {
+        for (const auto& clip : track.clips)
+        {
+            if (waveform::clipId (clip) != selectedClipId_)
+                continue;
+
+            map.found = true;
+            map.trackId = track.id;
+            map.lengthQuarter = std::max (0.25, clipLengthQuarters (clip));
+
+            if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
+            {
+                map.startQuarter = audio->startQuarterNotes;
+                map.lengthLocal = std::max (0.01, audio->lengthSeconds);
+                map.points = &audio->envelope;
+            }
+            else if (const auto* midi = std::get_if<waveform::MidiClip> (&clip))
+            {
+                map.startQuarter = midi->startQuarterNotes;
+                map.lengthLocal = std::max (0.25, midi->lengthQuarterNotes);
+                map.points = &midi->envelope;
+            }
+
+            return map;
+        }
+    }
+
+    return map;
+}
+
+double ArrangementView::localFromQuarter (const EnvelopeMap& map, double quarter) const
+{
+    const double span = std::max (0.25, map.lengthQuarter);
+    const double mix = std::clamp ((quarter - map.startQuarter) / span, 0.0, 1.0);
+    return mix * map.lengthLocal;
+}
+
+double ArrangementView::quarterFromLocal (const EnvelopeMap& map, double local) const
+{
+    const double span = std::max (0.01, map.lengthLocal);
+    const double mix = std::clamp (local / span, 0.0, 1.0);
+    return map.startQuarter + mix * std::max (0.25, map.lengthQuarter);
+}
+
 double ArrangementView::clipLengthQuarters (const waveform::Clip& clip) const
 {
     if (const auto* audio = std::get_if<waveform::AudioClip> (&clip))
@@ -349,6 +401,40 @@ void ArrangementView::paint (juce::Graphics& graphics)
                 }
             }
 
+            const std::vector<waveform::AutomationPoint>* envelope = nullptr;
+
+            if (const auto* audioClip = std::get_if<waveform::AudioClip> (&clip))
+                envelope = &audioClip->envelope;
+            else if (const auto* midiClip = std::get_if<waveform::MidiClip> (&clip))
+                envelope = &midiClip->envelope;
+
+            if (draggingPoint_ && editingEnvelope() && id == selectedClipId_)
+                envelope = &automationEdit_;
+
+            if (envelope != nullptr && envelope->size() >= 2)
+            {
+                EnvelopeMap map;
+                map.startQuarter = start;
+                map.lengthQuarter = std::max (0.25, length);
+                map.lengthLocal = audio ? std::max (0.01, std::get<waveform::AudioClip> (clip).lengthSeconds)
+                                        : std::max (0.25, std::get<waveform::MidiClip> (clip).lengthQuarterNotes);
+                juce::Path envelopePath;
+
+                for (std::size_t pointIndex = 0; pointIndex < envelope->size(); ++pointIndex)
+                {
+                    const float pointX = xForQuarter (quarterFromLocal (map, (*envelope)[pointIndex].quarterNotes));
+                    const float pointY = static_cast<float> (y + 6) + (1.0f - std::clamp (static_cast<float> ((*envelope)[pointIndex].value), 0.0f, 1.0f)) * static_cast<float> (kRow - 16);
+
+                    if (pointIndex == 0)
+                        envelopePath.startNewSubPath (pointX, pointY);
+                    else
+                        envelopePath.lineTo (pointX, pointY);
+                }
+
+                graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kCopper));
+                graphics.strokePath (envelopePath, juce::PathStrokeType (1.25f));
+            }
+
             graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kText));
             const auto name = audio ? std::get<waveform::AudioClip> (clip).name : std::get<waveform::MidiClip> (clip).name;
             graphics.drawText (name, static_cast<int> (x) + 4, y + 4, static_cast<int> (width) - 8, kRow - 10, juce::Justification::centredLeft);
@@ -361,7 +447,7 @@ void ArrangementView::paint (juce::Graphics& graphics)
         graphics.setColour (juce::Colour (0xff18211d));
         graphics.fillRoundedRectangle (lane.toFloat(), 4.0f);
         graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kDim));
-        graphics.drawText (automationParameter_, 8, lane.getY(), kNames - 12, lane.getHeight(), juce::Justification::centredLeft);
+        graphics.drawText (editingEnvelope() ? "clip envelope" : automationParameter_, 8, lane.getY(), kNames - 12, lane.getHeight(), juce::Justification::centredLeft);
 
         const waveform::Track* automated = nullptr;
 
@@ -370,8 +456,14 @@ void ArrangementView::paint (juce::Graphics& graphics)
                 automated = &track;
 
         const auto* points = &automationEdit_;
+        const auto envelope = selectedEnvelope();
 
-        if (! draggingPoint_ && automated != nullptr)
+        if (editingEnvelope())
+        {
+            if (! draggingPoint_ && envelope.points != nullptr)
+                points = envelope.points;
+        }
+        else if (! draggingPoint_ && automated != nullptr)
         {
             for (const auto& candidate : automated->automation)
                 if (candidate.parameter == automationParameter_)
@@ -384,8 +476,12 @@ void ArrangementView::paint (juce::Graphics& graphics)
 
             for (std::size_t index = 0; index < points->size(); ++index)
             {
-                const float x = xForQuarter ((*points)[index].quarterNotes);
-                const float y = static_cast<float> (yForDecibels ((*points)[index].value, lane));
+                const float x = editingEnvelope()
+                                    ? xForQuarter (quarterFromLocal (envelope, (*points)[index].quarterNotes))
+                                    : xForQuarter ((*points)[index].quarterNotes);
+                const float y = editingEnvelope()
+                                    ? static_cast<float> (lane.getBottom() - static_cast<int> (std::clamp ((*points)[index].value, 0.0, 1.0) * lane.getHeight()))
+                                    : static_cast<float> (yForDecibels ((*points)[index].value, lane));
 
                 if (index == 0)
                     path.startNewSubPath (x, y);
@@ -402,9 +498,15 @@ void ArrangementView::paint (juce::Graphics& graphics)
             graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kMint));
 
             for (const auto& point : *points)
-                graphics.fillEllipse (xForQuarter (point.quarterNotes) - 4.0f,
-                                       static_cast<float> (yForDecibels (point.value, lane)) - 4.0f,
-                                       8.0f, 8.0f);
+            {
+                const float x = editingEnvelope()
+                                    ? xForQuarter (quarterFromLocal (envelope, point.quarterNotes))
+                                    : xForQuarter (point.quarterNotes);
+                const float y = editingEnvelope()
+                                    ? static_cast<float> (lane.getBottom() - static_cast<int> (std::clamp (point.value, 0.0, 1.0) * lane.getHeight()))
+                                    : static_cast<float> (yForDecibels (point.value, lane));
+                graphics.fillEllipse (x - 4.0f, y - 4.0f, 8.0f, 8.0f);
+            }
         }
     }
 
@@ -420,6 +522,49 @@ void ArrangementView::paint (juce::Graphics& graphics)
 void ArrangementView::mouseDown (const juce::MouseEvent& event)
 {
     const auto lane = automationLane (*this, showAutomation_);
+
+    if (showAutomation_ && lane.contains (event.getPosition()) && project_ != nullptr && editingEnvelope())
+    {
+        const auto envelope = selectedEnvelope();
+
+        if (! envelope.found || envelope.points == nullptr)
+            return;
+
+        automationEdit_ = *envelope.points;
+        const double local = localFromQuarter (envelope, std::max (0.0, snapped (quarterAt (event.x))));
+        const double value = lane.getHeight() > 0
+                                 ? 1.0 - std::clamp ((static_cast<double> (event.y) - lane.getY()) / lane.getHeight(), 0.0, 1.0)
+                                 : 0.0;
+        int nearest = -1;
+        float best = 8.0f;
+
+        for (int index = 0; index < static_cast<int> (automationEdit_.size()); ++index)
+        {
+            const float dx = xForQuarter (quarterFromLocal (envelope, automationEdit_[static_cast<std::size_t> (index)].quarterNotes)) - static_cast<float> (event.x);
+            const float dy = static_cast<float> (lane.getBottom() - static_cast<int> (std::clamp (automationEdit_[static_cast<std::size_t> (index)].value, 0.0, 1.0) * lane.getHeight())) - static_cast<float> (event.y);
+            const float distance = std::sqrt (dx * dx + dy * dy);
+
+            if (distance < best)
+            {
+                best = distance;
+                nearest = index;
+            }
+        }
+
+        if (event.mods.isRightButtonDown() && nearest >= 0)
+            automationEdit_.erase (automationEdit_.begin() + nearest);
+        else if (nearest >= 0)
+            dragPoint_ = nearest;
+        else
+        {
+            automationEdit_.push_back ({ local, value });
+            dragPoint_ = static_cast<int> (automationEdit_.size()) - 1;
+        }
+
+        draggingPoint_ = true;
+        repaint();
+        return;
+    }
 
     if (showAutomation_ && lane.contains (event.getPosition()) && project_ != nullptr && ! automationTrackId_.empty())
     {
@@ -556,8 +701,20 @@ void ArrangementView::mouseDrag (const juce::MouseEvent& event)
     if (draggingPoint_ && dragPoint_ >= 0 && dragPoint_ < static_cast<int> (automationEdit_.size()))
     {
         const auto lane = automationLane (*this, true);
-        automationEdit_[static_cast<std::size_t> (dragPoint_)].quarterNotes = std::max (0.0, snapped (quarterAt (event.x)));
-        automationEdit_[static_cast<std::size_t> (dragPoint_)].value = decibelsAt (event.y, lane);
+
+        if (editingEnvelope())
+        {
+            const auto envelope = selectedEnvelope();
+            automationEdit_[static_cast<std::size_t> (dragPoint_)].quarterNotes = localFromQuarter (envelope, std::max (0.0, snapped (quarterAt (event.x))));
+            automationEdit_[static_cast<std::size_t> (dragPoint_)].value = lane.getHeight() > 0
+                                                                              ? 1.0 - std::clamp ((static_cast<double> (event.y) - lane.getY()) / lane.getHeight(), 0.0, 1.0)
+                                                                              : 0.0;
+        }
+        else
+        {
+            automationEdit_[static_cast<std::size_t> (dragPoint_)].quarterNotes = std::max (0.0, snapped (quarterAt (event.x)));
+            automationEdit_[static_cast<std::size_t> (dragPoint_)].value = decibelsAt (event.y, lane);
+        }
         repaint();
         return;
     }
@@ -619,7 +776,14 @@ void ArrangementView::mouseUp (const juce::MouseEvent&)
         draggingPoint_ = false;
         dragPoint_ = -1;
 
-        if (onAutomation)
+        if (editingEnvelope())
+        {
+            const auto envelope = selectedEnvelope();
+
+            if (envelope.found && onClipEnvelope)
+                onClipEnvelope (envelope.trackId, selectedClipId_, automationEdit_);
+        }
+        else if (onAutomation)
             onAutomation (automationTrackId_, automationEdit_);
 
         return;

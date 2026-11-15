@@ -31,6 +31,7 @@ public:
     std::function<void (double quarterNotes)> onSeek;
     std::function<void (bool enabled, double startQuarterNotes, double endQuarterNotes)> onLoopEdit;
     std::function<void (const std::string& trackId, std::vector<waveform::AutomationPoint> points)> onAutomation;
+    std::function<void (const std::string& trackId, const std::string& clipId, std::vector<waveform::AutomationPoint> points)> onClipEnvelope;
     std::function<void (const std::string& trackId, const std::string& clipId, std::vector<waveform::WarpMarker> warp, std::vector<waveform::CompSegment> comp)> onMarkers;
     std::function<void (const std::string& path, const std::string& trackId, double startQuarterNotes)> onDropFile;
     std::function<void (const std::string& path, const std::string& trackId, const std::string& clipId)> onAddTake;
@@ -74,6 +75,21 @@ private:
     [[nodiscard]] double quarterAt (int x) const;
     [[nodiscard]] float xForQuarter (double quarterNotes) const;
     [[nodiscard]] double clipLengthQuarters (const waveform::Clip& clip) const;
+
+    struct EnvelopeMap
+    {
+        bool found = false;
+        std::string trackId;
+        double startQuarter = 0.0;
+        double lengthQuarter = 1.0;
+        double lengthLocal = 1.0;
+        const std::vector<waveform::AutomationPoint>* points = nullptr;
+    };
+
+    [[nodiscard]] bool editingEnvelope() const noexcept { return automationParameter_ == "clip.envelope"; }
+    [[nodiscard]] EnvelopeMap selectedEnvelope() const;
+    [[nodiscard]] double localFromQuarter (const EnvelopeMap& map, double quarter) const;
+    [[nodiscard]] double quarterFromLocal (const EnvelopeMap& map, double local) const;
 
     const waveform::Project* project_ = nullptr;
     double playhead_ = 0.0;

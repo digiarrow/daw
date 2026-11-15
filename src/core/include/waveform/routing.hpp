@@ -18,6 +18,8 @@ struct RouteEndpoint
     float gain = 1.0f;
     float panLeft = 0.70710678f;
     float panRight = 0.70710678f;
+    const float* sampleGain = nullptr; ///< Linear gain per frame. Null uses `gain`.
+    const float* samplePan = nullptr;  ///< Pan -1..1 per frame. Null uses `panLeft`/`panRight`.
     int sendBus[kMaxSends] { -1, -1 };
     float sendGain[kMaxSends] { 0.0f, 0.0f };
     bool sendPre[kMaxSends] { false, false };

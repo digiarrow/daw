@@ -531,6 +531,12 @@ MainComponent::MainComponent()
         syncEngine();
         refreshHistoryButtons();
     };
+    arrangement_.onClipEnvelope = [this] (const std::string& trackId, const std::string& clipId, std::vector<waveform::AutomationPoint> points)
+    {
+        history_.execute (project_, std::make_unique<waveform::SetClipEnvelopeCommand> (trackId, clipId, std::move (points)));
+        syncEngine();
+        refreshHistoryButtons();
+    };
     automationButton_.onClick = [this]
     {
         showAutomation_ = ! showAutomation_;
@@ -646,6 +652,10 @@ MainComponent::MainComponent()
 
         engine_.launchSession (track, scene, quantize, mode, follow, after, repeat);
         setStatus (quantize == 0 ? "Scene launched." : quantize == 1 ? "Scene waits for the next beat." : "Scene waits for the next bar.");
+    };
+    session_.onRelease = [this] (int track, int)
+    {
+        engine_.releaseSession (track);
     };
     session_.onLaunchScene = [this] (int scene)
     {
@@ -1234,13 +1244,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
         const double tempo = waveform::detectTempoBpm (loaded->left.data(), loaded->frames(), loaded->sampleRate);
         const double seconds = loaded->sampleRate > 0.0 ? static_cast<double> (loaded->frames()) / loaded->sampleRate : 0.0;
         auto markers = waveform::autoWarpMarkers (seconds, tempo > 0.0 ? tempo : project_.tempoBpm);
-        history_.execute (project_, std::make_unique<waveform::SetClipMarkersCommand> (track->id, audio->id, std::move (markers), audio->comp));
-
-        if (auto* edited = waveform::findTrack (project_, track->id))
-            for (auto& clip : edited->clips)
-                if (auto* concrete = std::get_if<waveform::AudioClip> (&clip); concrete != nullptr && concrete->id == selectedClipId_)
-                    concrete->warpMode = static_cast<int> (waveform::WarpMode::Beats);
-
+        history_.execute (project_, std::make_unique<waveform::SetClipMarkersCommand> (track->id, audio->id, std::move (markers), audio->comp, static_cast<int> (waveform::WarpMode::Beats)));
         syncEngine();
         refreshHistoryButtons();
         setStatus ("Auto-warp estimated " + juce::String (tempo, 1) + " BPM and set beats mode.");
@@ -1259,6 +1263,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
             automationParameter_ = "synth.cutoffHz";
         else if (automationParameter_ == "synth.cutoffHz")
             automationParameter_ = "effect.0.p0";
+        else if (automationParameter_ == "effect.0.p0")
+            automationParameter_ = "clip.envelope";
         else
             automationParameter_ = "mixer.gainDb";
 
@@ -2268,12 +2274,14 @@ void MainComponent::commitTake()
 
         if (session_.isVisible() && selectedScene_ >= 0)
         {
-            auto& destination = project_.tracks[static_cast<std::size_t> (midi.trackIndex)];
-            waveform::recordIntoSessionSlot (destination, selectedScene_, clip);
+            const auto& destination = project_.tracks[static_cast<std::size_t> (midi.trackIndex)];
+            history_.execute (project_, std::make_unique<waveform::RecordSessionSlotCommand> (destination.id, selectedScene_, std::move (clip)));
 
-            for (const auto& slot : destination.session)
-                if (slot.scene == selectedScene_)
-                    selectedClipId_ = waveform::clipId (slot.clip);
+            if (const auto* updated = waveform::findTrack (project_, destination.id))
+                for (const auto& slot : updated->session)
+                    if (slot.scene == selectedScene_)
+                        selectedClipId_ = waveform::clipId (slot.clip);
+
             syncEngine();
             rebuildTracks();
             refreshHistoryButtons();

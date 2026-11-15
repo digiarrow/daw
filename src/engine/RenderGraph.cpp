@@ -478,7 +478,11 @@ void renderTrackInstrument (const RenderTrack& track,
                            float leftGain,
                            float rightGain,
                            float* left,
-                           float* right) noexcept
+                           float* right,
+                           int trackIndex,
+                           const AutomationLane* cutoff,
+                           double startQuarter,
+                           double tempoBpm) noexcept
 {
     if (track.instrument == InstrumentKind::Fm)
     {
@@ -490,28 +494,13 @@ void renderTrackInstrument (const RenderTrack& track,
     {
         if (track.drumRack.count > 0)
         {
-            static PadVoice voices[64][4] {};
-            static int counts[64] {};
-            const int slot = 0;
+            PadVoice* voices = drumVoicePool (trackIndex);
 
             for (int index = 0; index < noteCount; ++index)
                 if (notes[index].onsetSeconds >= -1.0e-4 && notes[index].onsetSeconds < static_cast<double> (frames) / sampleRate)
-                    strikeDrumRack (voices[slot], 4, track.drumRack, notes[index].note);
+                    strikeDrumRack (voices, 4, track.drumRack, notes[index].note);
 
-            float rackLeft[2048];
-            float rackRight[2048];
-            const int limited = std::min (frames, 2048);
-            std::fill (rackLeft, rackLeft + limited, 0.0f);
-            std::fill (rackRight, rackRight + limited, 0.0f);
-            renderDrumRack (voices[slot], 4, track.drumRack, limited, sampleRate, rackLeft, rackRight);
-            counts[slot] = 4;
-
-            for (int index = 0; index < limited; ++index)
-            {
-                left[index] += rackLeft[index] * leftGain;
-                right[index] += rackRight[index] * rightGain;
-            }
-
+            mixDrumRack (voices, 4, track.drumRack, frames, sampleRate, leftGain, rightGain, left, right);
             return;
         }
 
@@ -543,7 +532,7 @@ void renderTrackInstrument (const RenderTrack& track,
         return;
     }
 
-    renderSynthNotes (notes, noteCount, frames, sampleRate, track.patch, memory, leftGain, rightGain, left, right);
+    renderSynthNotes (notes, noteCount, frames, sampleRate, track.patch, memory, leftGain, rightGain, left, right, cutoff, startQuarter, tempoBpm);
 }
 
 void renderLinearBlock (const RenderGraph* graph,
@@ -675,21 +664,7 @@ void renderLinearBlock (const RenderGraph* graph,
     if (overflow && overflowCount != nullptr)
         overflowCount->store (1, std::memory_order_relaxed);
 
-    bool routed = false;
-
-    if (scratch != nullptr && graph != nullptr && scratch->capacity >= frames)
-    {
-        if (external != nullptr && external->process != nullptr)
-            routed = true;
-
-        for (const auto& track : graph->tracks)
-            if (! track.chains.empty())
-                routed = true;
-
-        for (const auto& track : graph->tracks)
-            if (track.group || track.effectCount > 0 || track.outputBus != 0 || track.sendGain[0] > 0.0f || track.sendGain[1] > 0.0f)
-                routed = true;
-    }
+    bool routed = scratch != nullptr && graph != nullptr && scratch->capacity >= frames;
 
     if (routed)
     {
@@ -728,8 +703,16 @@ void renderLinearBlock (const RenderGraph* graph,
                 if (arrangement)
                     noteCount = appendShapedLive (source, synth, index, tempoBpm, sounding, noteCount, 128);
 
+                const AutomationLane* cutoffLane = nullptr;
+
+                for (const auto& lane : source.automation)
+                    if (lane.parameter == "synth.cutoffHz" && ! lane.points.empty())
+                        cutoffLane = &lane;
+
+                const double blockQuarter = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
                 renderTrackInstrument (source, sounding, noteCount, frames, sampleRate, synth->memories[index],
-                                      1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index]);
+                                      1.0f, 1.0f, scratch->trackLeft[index], scratch->trackRight[index],
+                                      index, cutoffLane, blockQuarter, tempoBpm);
             }
 
             if (scratch->effects != nullptr)
@@ -744,26 +727,22 @@ void renderLinearBlock (const RenderGraph* graph,
                     sideRight = scratch->trackRight[source.sidechainTrack];
                 }
 
-                float automation[2048];
-                const int automatedFrames = std::min (frames, 2048);
+                bool effectLane = false;
 
                 for (const auto& lane : source.automation)
-                {
-                    if (lane.parameter != "mixer.gainDb" || lane.points.empty() || ! (tempoBpm > 0.0))
-                        continue;
+                    if (! lane.points.empty() && bindAutomationParameter (lane.parameter.c_str()).kind == AutomationKind::Effect)
+                        effectLane = true;
 
-                    const double startQuarter = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
-                    writeAutomation (lane, startQuarter, automatedFrames, sampleRate, tempoBpm, automation, source.gainDb);
+                const double blockQuarter = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
 
-                    for (int sample = 0; sample < automatedFrames; ++sample)
-                        automation[sample] = dbToLinear (automation[sample]);
-
-                    applyGainCurve (scratch->trackLeft[index], scratch->trackRight[index], automation, automatedFrames);
-                    break;
-                }
-
-                processInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
-                                scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate, sideLeft, sideRight);
+                if (effectLane)
+                    processAutomatedInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
+                                             scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate,
+                                             sideLeft, sideRight, source.automation.data(), static_cast<int> (source.automation.size()),
+                                             blockQuarter, tempoBpm);
+                else
+                    processInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
+                                    scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate, sideLeft, sideRight);
             }
 
             if (external != nullptr && external->process != nullptr)
@@ -811,14 +790,76 @@ void renderLinearBlock (const RenderGraph* graph,
 
         if (routed)
         {
-            routeTracks (scratch->trackLeft, scratch->trackRight, endpoints, count,
-                         scratch->busLeft, scratch->busRight, std::min (busCount, kMaxBuses), frames);
-            const float master = graph->masterGain;
+            constexpr int kSlice = 128;
+            float gainCurve[kMaxRouteTracks * kSlice];
+            float panCurve[kMaxRouteTracks * kSlice];
 
-            for (int frame = 0; frame < frames; ++frame)
+            for (int offset = 0; offset < frames; offset += kSlice)
             {
-                left[frame] = scratch->busLeft[0][frame] * master;
-                right[frame] = scratch->busRight[0][frame] * master;
+                const int slice = std::min (kSlice, frames - offset);
+                const double startQuarter = Timing::quarterNotesFromSamples (timelineStart + offset, sampleRate, tempoBpm);
+                const float* sliceLeft[kMaxRouteTracks] {};
+                const float* sliceRight[kMaxRouteTracks] {};
+                float* sliceBusLeft[kMaxBuses] {};
+                float* sliceBusRight[kMaxBuses] {};
+
+                for (int index = 0; index < count; ++index)
+                {
+                    sliceLeft[index] = scratch->trackLeft[index] + offset;
+                    sliceRight[index] = scratch->trackRight[index] + offset;
+                    float* gain = gainCurve + index * kSlice;
+                    float* pan = panCurve + index * kSlice;
+                    const auto& source = graph->tracks[static_cast<std::size_t> (index)];
+                    const AutomationLane* gainLane = nullptr;
+                    const AutomationLane* panLane = nullptr;
+
+                    for (const auto& lane : source.automation)
+                    {
+                        if (lane.points.empty())
+                            continue;
+
+                        if (lane.parameter == "mixer.gainDb")
+                            gainLane = &lane;
+                        else if (lane.parameter == "mixer.pan")
+                            panLane = &lane;
+                    }
+
+                    if (gainLane != nullptr && tempoBpm > 0.0)
+                        writeAutomation (*gainLane, startQuarter, slice, sampleRate, tempoBpm, gain, source.gainDb);
+                    else
+                        std::fill (gain, gain + slice, source.gainDb);
+
+                    float lfo = 0.0f;
+
+                    if (lfoPhase != nullptr && source.modulator.enabled && source.modulator.target == "mixer.gainDb")
+                        lfo = static_cast<float> (std::sin (lfoPhase[index]) * source.modulator.depth);
+
+                    for (int sample = 0; sample < slice; ++sample)
+                        gain[sample] = dbToLinear (static_cast<double> (gain[sample]) + static_cast<double> (lfo));
+
+                    if (panLane != nullptr && tempoBpm > 0.0)
+                        writeAutomation (*panLane, startQuarter, slice, sampleRate, tempoBpm, pan, source.pan);
+                    else
+                        std::fill (pan, pan + slice, source.pan);
+
+                    endpoints[index].sampleGain = gain;
+                    endpoints[index].samplePan = pan;
+                }
+
+                for (int bus = 0; bus < kMaxBuses; ++bus)
+                {
+                    sliceBusLeft[bus] = scratch->busLeft[bus] != nullptr ? scratch->busLeft[bus] + offset : nullptr;
+                    sliceBusRight[bus] = scratch->busRight[bus] != nullptr ? scratch->busRight[bus] + offset : nullptr;
+                }
+
+                routeTracks (sliceLeft, sliceRight, endpoints, count, sliceBusLeft, sliceBusRight, std::min (busCount, kMaxBuses), slice);
+                const float master = graph->masterGain;
+
+                for (int frame = 0; frame < slice; ++frame)
+                {
+                    left[offset + frame] = sliceBusLeft[0][frame] * master;
+                    right[offset + frame] = sliceBusRight[0][frame] * master;
+                }
             }
         }
     }
@@ -858,10 +899,17 @@ void renderLinearBlock (const RenderGraph* graph,
                 count = appendShapedLive (track, synth, trackIndex, tempoBpm, sounding, count, 128);
 
             const PanGains pan = constantPowerPan (track.pan);
+            const AutomationLane* cutoffLane = nullptr;
+
+            for (const auto& lane : track.automation)
+                if (lane.parameter == "synth.cutoffHz" && ! lane.points.empty())
+                    cutoffLane = &lane;
+
+            const double blockQuarter = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
             renderTrackInstrument (track, sounding, count, frames, sampleRate, synth->memories[trackIndex],
                                   track.gain * pan.left * graph->masterGain,
                                   track.gain * pan.right * graph->masterGain,
-                                  left, right);
+                                  left, right, trackIndex, cutoffLane, blockQuarter, tempoBpm);
         }
     }
 

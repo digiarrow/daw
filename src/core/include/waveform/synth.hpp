@@ -1,5 +1,6 @@
 #pragma once
 
+#include "waveform/automation.hpp"
 #include "waveform/project.hpp"
 
 #include <cstdint>
@@ -27,6 +28,7 @@ struct SoundingNote
 };
 
 /// Adds the built-in polysynth into `left` and `right`. Does not clear the buffers and does not allocate.
+/// `cutoff` overrides `patch.cutoffHz` per sample when it has points. `startQuarter` is the block start.
 void renderSynthNotes (const SoundingNote* notes,
                        int noteCount,
                        int frames,
@@ -36,6 +38,9 @@ void renderSynthNotes (const SoundingNote* notes,
                        float leftGain,
                        float rightGain,
                        float* left,
-                       float* right) noexcept;
+                       float* right,
+                       const AutomationLane* cutoff = nullptr,
+                       double startQuarter = 0.0,
+                       double tempoBpm = 0.0) noexcept;
 
 } // namespace waveform

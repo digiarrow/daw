@@ -333,4 +333,69 @@ void processInserts (const EffectSlot* slots,
     }
 }
 
+void setEffectParameter (EffectSlot& slot, int parameter, double value) noexcept
+{
+    switch (parameter)
+    {
+        case 0: slot.p0 = value; break;
+        case 1: slot.p1 = value; break;
+        case 2: slot.p2 = value; break;
+        case 3: slot.p3 = value; break;
+        case 4: slot.p4 = value; break;
+        case 5: slot.p5 = value; break;
+        default: break;
+    }
+}
+
+void processAutomatedInserts (const EffectSlot* slots,
+                              int slotCount,
+                              EffectState* states,
+                              float* left,
+                              float* right,
+                              int frames,
+                              double sampleRate,
+                              const float* sidechainLeft,
+                              const float* sidechainRight,
+                              const AutomationLane* lanes,
+                              int laneCount,
+                              double startQuarter,
+                              double bpm) noexcept
+{
+    if (slots == nullptr || states == nullptr || frames <= 0)
+        return;
+
+    const int count = std::min (slotCount, kMaxInserts);
+    AutomationBinding bindings[32] {};
+    const int bound = std::min (laneCount, 32);
+    const double quartersPerSample = sampleRate > 0.0 && bpm > 0.0 ? (bpm / 60.0) / sampleRate : 0.0;
+
+    for (int index = 0; index < bound; ++index)
+        bindings[index] = lanes != nullptr ? bindAutomationParameter (lanes[index].parameter.c_str()) : AutomationBinding {};
+
+    for (int frame = 0; frame < frames; ++frame)
+    {
+        EffectSlot local[kMaxInserts] {};
+
+        for (int index = 0; index < count; ++index)
+            local[index] = slots[index];
+
+        const double quarter = startQuarter + quartersPerSample * static_cast<double> (frame);
+
+        for (int index = 0; index < bound; ++index)
+        {
+            if (bindings[index].kind != AutomationKind::Effect || lanes == nullptr)
+                continue;
+
+            if (bindings[index].effect < 0 || bindings[index].effect >= count)
+                continue;
+
+            setEffectParameter (local[bindings[index].effect], bindings[index].parameter, automationAt (lanes[index], quarter, 0.0));
+        }
+
+        const float* sideLeft = sidechainLeft != nullptr ? sidechainLeft + frame : nullptr;
+        const float* sideRight = sidechainRight != nullptr ? sidechainRight + frame : nullptr;
+        processInserts (local, count, states, left + frame, right + frame, 1, sampleRate, sideLeft, sideRight);
+    }
+}
+
 } // namespace waveform

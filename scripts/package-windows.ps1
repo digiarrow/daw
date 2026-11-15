@@ -29,4 +29,12 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & cpack --config build-package/CPackConfig.cmake -C Release -B build-package/package
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Write-Host "Zip: build-package/package/"
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = Get-ChildItem "build-package/package/*.zip" | Select-Object -First 1
+if ($null -eq $zip) { throw "Windows package did not produce a zip." }
+$archive = [System.IO.Compression.ZipFile]::OpenRead($zip.FullName)
+$helper = @($archive.Entries | Where-Object { $_.Name -eq "juceaide.exe" })
+$archive.Dispose()
+if ($helper.Count -gt 0) { throw "Windows zip still contains juceaide.exe." }
+Write-Host "Zip: $($zip.FullName)"
