@@ -180,7 +180,8 @@ enum class InstrumentKind
     Synth,
     Sampler,
     Fm,
-    Drum
+    Drum,
+    Wavetable
 };
 
 struct DeviceChain
@@ -291,6 +292,15 @@ struct Track
     std::vector<MidiEffect> midiEffects; ///< Processors in front of the instrument. MIDI tracks only.
     int sidechainTrack = -1;             ///< Track index whose output feeds this track's compressor.
     DrumRack drumRack;
+    int crossfaderSide = 0;              ///< 0 none, 1 A, 2 B.
+    int inputPair = 0;                   ///< Stereo input pair. 0 is channels 1-2.
+    int outputPair = 0;                  ///< Stereo output pair. 0 stays on the master.
+};
+
+struct SignaturePoint
+{
+    double quarterNotes = 0.0;
+    TimeSignature signature {};
 };
 
 struct Project
@@ -298,6 +308,11 @@ struct Project
     std::string name = "Untitled";
     double tempoBpm = 120.0;
     TimeSignature timeSignature {};
+    std::vector<SignaturePoint> signatures;
+    bool punchEnabled = false;
+    double punchStartQuarter = 0.0;
+    double punchEndQuarter = 4.0;
+    float crossfader = 0.0f; ///< 0 is crossfader A, 1 is B.
     bool loopEnabled = false;
     double loopStartQuarterNotes = 0.0;
     double loopEndQuarterNotes = 8.0;

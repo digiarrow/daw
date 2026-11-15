@@ -1,4 +1,5 @@
 #include "waveform/effects.hpp"
+#include "waveform/phase8.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -66,6 +67,43 @@ EffectSlot defaultEffect (EffectKind kind) noexcept
             slot.p0 = 0.4; // drive
             slot.p1 = 0.7; // mix
             break;
+        case EffectKind::AutoFilter:
+            slot.p0 = 0.5;    // rate Hz
+            slot.p1 = 800.0;  // base Hz
+            slot.p2 = 0.7;    // depth
+            slot.p3 = 0.2;    // resonance
+            break;
+        case EffectKind::Phaser:
+            slot.p0 = 0.3; // rate Hz
+            slot.p1 = 0.6; // depth
+            slot.p2 = 0.4; // feedback
+            slot.p3 = 0.5; // mix
+            break;
+        case EffectKind::Flanger:
+            slot.p0 = 0.25; // rate Hz
+            slot.p1 = 0.004; // depth seconds
+            slot.p2 = 0.4; // feedback
+            slot.p3 = 0.5; // mix
+            break;
+        case EffectKind::Gate:
+            slot.p0 = -40.0; // threshold dB
+            slot.p1 = 0.005; // attack seconds
+            slot.p2 = 0.08;  // release seconds
+            slot.p3 = 0.0;   // floor gain
+            break;
+        case EffectKind::Glue:
+            slot.p0 = -12.0; // threshold dB
+            slot.p1 = 2.5;   // ratio
+            slot.p2 = 0.03;  // attack seconds
+            slot.p3 = 0.2;   // release seconds
+            slot.p4 = 1.0;   // makeup dB
+            break;
+        case EffectKind::Redux:
+            slot.p0 = 8.0; // bits
+            slot.p1 = 4.0; // hold samples
+            break;
+        case EffectKind::Spectrum:
+            break;
     }
 
     return slot;
@@ -83,6 +121,13 @@ const char* effectName (EffectKind kind) noexcept
         case EffectKind::Utility: return "utility";
         case EffectKind::Chorus: return "chorus";
         case EffectKind::Saturator: return "saturator";
+        case EffectKind::AutoFilter: return "autofilter";
+        case EffectKind::Phaser: return "phaser";
+        case EffectKind::Flanger: return "flanger";
+        case EffectKind::Gate: return "gate";
+        case EffectKind::Glue: return "glue";
+        case EffectKind::Redux: return "redux";
+        case EffectKind::Spectrum: return "spectrum";
     }
 
     return "utility";
@@ -102,6 +147,13 @@ EffectKind effectFromName (const char* name) noexcept
     if (text == "limiter") return EffectKind::Limiter;
     if (text == "chorus") return EffectKind::Chorus;
     if (text == "saturator") return EffectKind::Saturator;
+    if (text == "autofilter") return EffectKind::AutoFilter;
+    if (text == "phaser") return EffectKind::Phaser;
+    if (text == "flanger") return EffectKind::Flanger;
+    if (text == "gate") return EffectKind::Gate;
+    if (text == "glue") return EffectKind::Glue;
+    if (text == "redux") return EffectKind::Redux;
+    if (text == "spectrum") return EffectKind::Spectrum;
     return EffectKind::Utility;
 }
 
@@ -304,6 +356,145 @@ void processEffect (const EffectSlot& slot,
                 left[i] = left[i] * (1.0f - mix) + wetL * mix;
                 right[i] = right[i] * (1.0f - mix) + wetR * mix;
             }
+            break;
+        }
+        case EffectKind::AutoFilter:
+        {
+            const float rate = clampUnit (slot.p0, 0.05, 8.0);
+            const float base = clampUnit (slot.p1, 80.0, 8000.0);
+            const float depth = clampUnit (slot.p2, 0.0, 1.0);
+            const float q = std::clamp (1.0f - clampUnit (slot.p3, 0.0, 0.9), 0.08f, 1.0f);
+
+            for (int i = 0; i < frames; ++i)
+            {
+                state.z1 += rate / sr;
+                const float cutoff = base * std::pow (2.0f, std::sin (state.z1 * 6.2831853f) * depth * 3.0f);
+                const float f = 2.0f * std::sin (kPi * std::min (cutoff, sr * 0.45f) / sr);
+                const float input = 0.5f * (left[i] + right[i]);
+                state.y1 += f * state.y2;
+                const float high = input - state.y1 - q * state.y2;
+                state.y2 += f * high;
+                left[i] = state.y1;
+                right[i] = state.y1;
+            }
+            break;
+        }
+        case EffectKind::Phaser:
+        {
+            const float rate = clampUnit (slot.p0, 0.05, 8.0);
+            const float depth = clampUnit (slot.p1, 0.0, 1.0);
+            const float feedback = clampUnit (slot.p2, 0.0, 0.9);
+            const float mix = clampUnit (slot.p3, 0.0, 1.0);
+
+            for (int i = 0; i < frames; ++i)
+            {
+                state.z1 += rate / sr;
+                const float coeff = 0.5f + 0.45f * std::sin (state.z1 * 6.2831853f) * depth;
+                auto allpass = [coeff] (float input, float& memory)
+                {
+                    const float output = -input + memory;
+                    memory = input + coeff * output;
+                    return output;
+                };
+                float sample = 0.5f * (left[i] + right[i]) + state.env * feedback;
+                sample = allpass (sample, state.y1);
+                sample = allpass (sample, state.y2);
+                sample = allpass (sample, state.z2);
+                state.env = sample;
+                left[i] = left[i] * (1.0f - mix) + sample * mix;
+                right[i] = right[i] * (1.0f - mix) + sample * mix;
+            }
+            break;
+        }
+        case EffectKind::Flanger:
+        {
+            const float rate = clampUnit (slot.p0, 0.05, 5.0);
+            const int depth = std::clamp (static_cast<int> (clampUnit (slot.p1, 0.0002, 0.02) * sr), 1, kDelayCapacity - 2);
+            const float feedback = clampUnit (slot.p2, 0.0, 0.85);
+            const float mix = clampUnit (slot.p3, 0.0, 1.0);
+
+            for (int i = 0; i < frames; ++i)
+            {
+                state.z1 += rate / sr;
+                const int delay = 1 + static_cast<int> ((0.5f + 0.5f * std::sin (state.z1 * 6.2831853f)) * static_cast<float> (depth));
+                const int read = (state.write + kDelayCapacity - delay) % kDelayCapacity;
+                const float wetL = state.delayL[read];
+                const float wetR = state.delayR[read];
+                state.delayL[state.write] = left[i] + wetL * feedback;
+                state.delayR[state.write] = right[i] + wetR * feedback;
+                state.write = (state.write + 1) % kDelayCapacity;
+                left[i] = left[i] * (1.0f - mix) + wetL * mix;
+                right[i] = right[i] * (1.0f - mix) + wetR * mix;
+            }
+            break;
+        }
+        case EffectKind::Gate:
+        {
+            const float threshold = std::pow (10.0f, clampUnit (slot.p0, -80.0, 0.0) / 20.0f);
+            const float attack = std::exp (-1.0f / std::max (1.0f, clampUnit (slot.p1, 0.001, 0.2) * sr));
+            const float release = std::exp (-1.0f / std::max (1.0f, clampUnit (slot.p2, 0.01, 1.0) * sr));
+            const float floor = clampUnit (slot.p3, 0.0, 1.0);
+
+            for (int i = 0; i < frames; ++i)
+            {
+                const float detector = std::max (std::abs (left[i]), std::abs (right[i]));
+                const float target = detector >= threshold ? 1.0f : floor;
+                const float coeff = target > state.env ? attack : release;
+                state.env = target + (state.env - target) * coeff;
+                left[i] *= state.env;
+                right[i] *= state.env;
+            }
+            break;
+        }
+        case EffectKind::Glue:
+        {
+            const float threshold = std::pow (10.0f, clampUnit (slot.p0, -40.0, 0.0) / 20.0f);
+            const float ratio = clampUnit (slot.p1, 1.0, 20.0);
+            const float attack = std::exp (-1.0f / std::max (1.0f, clampUnit (slot.p2, 0.001, 0.2) * sr));
+            const float release = std::exp (-1.0f / std::max (1.0f, clampUnit (slot.p3, 0.02, 1.5) * sr));
+            const float makeup = std::pow (10.0f, clampUnit (slot.p4, 0.0, 24.0) / 20.0f);
+
+            for (int i = 0; i < frames; ++i)
+            {
+                const float detector = std::max (std::abs (left[i]), std::abs (right[i]));
+                const float over = detector > threshold ? detector / threshold : 1.0f;
+                const float target = over > 1.0f ? std::pow (over, (1.0f - ratio) / ratio) : 1.0f;
+                const float coeff = target < state.env ? attack : release;
+                state.env = target + (state.env - target) * coeff;
+                const float gain = state.env * makeup;
+                left[i] = std::tanh (left[i] * gain);
+                right[i] = std::tanh (right[i] * gain);
+            }
+            break;
+        }
+        case EffectKind::Redux:
+        {
+            const int bits = std::clamp (static_cast<int> (slot.p0), 1, 16);
+            const int hold = std::clamp (static_cast<int> (slot.p1), 1, 64);
+            const float steps = static_cast<float> (1 << (bits - 1));
+
+            for (int i = 0; i < frames; ++i)
+            {
+                if (state.write % hold == 0)
+                {
+                    state.y1 = std::round (std::clamp (left[i], -1.0f, 1.0f) * steps) / steps;
+                    state.y2 = std::round (std::clamp (right[i], -1.0f, 1.0f) * steps) / steps;
+                }
+
+                left[i] = state.y1;
+                right[i] = state.y2;
+                state.write = (state.write + 1) % 1024;
+            }
+            break;
+        }
+        case EffectKind::Spectrum:
+        {
+            float bands[8] {};
+            spectrumBands (left, frames, bands, 8);
+
+            for (int band = 0; band < 8; ++band)
+                state.combL[0][band] = bands[band];
+
             break;
         }
     }

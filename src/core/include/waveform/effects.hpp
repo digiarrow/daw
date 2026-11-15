@@ -16,7 +16,14 @@ enum class EffectKind
     Limiter,
     Utility,
     Chorus,
-    Saturator
+    Saturator,
+    AutoFilter,
+    Phaser,
+    Flanger,
+    Gate,
+    Glue,
+    Redux,
+    Spectrum
 };
 
 inline constexpr int kMaxInserts = 4;

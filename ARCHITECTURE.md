@@ -106,4 +106,8 @@ The arrangement view and piano roll are message-thread components. They read the
 
 **Automation.** Gain, pan, filter cutoff, and `effect.<n>.p<0-5>` lanes are applied per sample inside `renderLinearBlock` when the block fits the preallocated scratch. The clip envelope is edited in the arrangement lane (V cycles to it) and drawn on the clip. `SetClipEnvelopeCommand` undoes that edit.
 
+**Parallel tracks.** `assignTrackWaves` marks tracks that do not depend on each other. When a block has no sidechain, group, rack, or extra output pair, `WorkerPool` runs each track's clip mix, instrument, and inserts on a worker thread and joins before the buses sum.
+
+**Later devices and I/O.** Auto filter, phaser, flanger, gate, glue, redux, and spectrum are `EffectKind` values. The wavetable instrument reads a sine-to-saw table. `crossfaderLevel` scales A and B. `resampleLinear` changes an input rate. `hardwareChannel` picks a stereo pair. `signatureAt` reads time-signature changes. Freeze prints gain and fades into a buffer. Punch and overdub edit MIDI note lists. MIDI clock is 24 pulses per quarter. Browser search matches `tags.txt`. MP3/AAC export is not implemented.
+
 **Library pieces past the window.** `later.hpp` holds warp markers, comp segments, racks, key snapping, MIDI transforms, an LFO, FM and drum voices, a tiny script, one CC map, monophonic audio-to-MIDI, and the delay line for plugin delay compensation. See [ROADMAP.md](ROADMAP.md) for what is tested, what is not in the window, and what was skipped (Link, neural stem weights, a live VST3 slot).

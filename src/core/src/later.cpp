@@ -1,4 +1,6 @@
 #include "waveform/later.hpp"
+#include "waveform/automation.hpp"
+#include "waveform/effects.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -342,7 +344,7 @@ bool applyControlChange (Project& project, const std::string& trackId, int cc, i
         if (mapping.cc == cc)
             found = &mapping;
 
-    if (found == nullptr || found->parameter != "mixer.gainDb")
+    if (found == nullptr)
         return false;
 
     auto* track = findTrack (project, trackId);
@@ -350,8 +352,36 @@ bool applyControlChange (Project& project, const std::string& trackId, int cc, i
     if (track == nullptr)
         return false;
 
-    track->mixer.gainDb = -48.0 + (48.0 * std::clamp (value, 0, 127) / 127.0);
-    return true;
+    const double unit = std::clamp (value, 0, 127) / 127.0;
+    const auto binding = bindAutomationParameter (found->parameter.c_str());
+
+    if (binding.kind == AutomationKind::GainDb)
+    {
+        track->mixer.gainDb = -48.0 + 48.0 * unit;
+        return true;
+    }
+
+    if (binding.kind == AutomationKind::Pan)
+    {
+        track->mixer.pan = unit * 2.0 - 1.0;
+        return true;
+    }
+
+    if (binding.kind == AutomationKind::Cutoff)
+    {
+        track->synth.cutoffHz = 80.0 + unit * (8000.0 - 80.0);
+        return true;
+    }
+
+    if (binding.kind == AutomationKind::Effect
+        && binding.effect >= 0
+        && binding.effect < static_cast<int> (track->effects.size()))
+    {
+        setEffectParameter (track->effects[static_cast<std::size_t> (binding.effect)], binding.parameter, unit);
+        return true;
+    }
+
+    return false;
 }
 
 std::vector<DetectedNote> audioToMidi (const float* samples, int frames, double sampleRate) noexcept

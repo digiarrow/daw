@@ -6,9 +6,11 @@
 #include "waveform/collect.hpp"
 #include "waveform/later.hpp"
 #include "waveform/midi_file.hpp"
+#include "waveform/mix.hpp"
 #include "waveform/plugins.hpp"
 #include "StudioLookAndFeel.hpp"
 #include "waveform/paths.hpp"
+#include "waveform/phase8.hpp"
 #include "waveform/serialize.hpp"
 #include "waveform/session.hpp"
 #include "waveform/stretch.hpp"
@@ -587,6 +589,7 @@ MainComponent::MainComponent()
     instrumentBox_.addItem ("Sampler", 2);
     instrumentBox_.addItem ("FM", 3);
     instrumentBox_.addItem ("Drum", 4);
+    instrumentBox_.addItem ("Wavetable", 5);
     instrumentBox_.setSelectedId (1, juce::dontSendNotification);
     instrumentBox_.onChange = [this]
     {
@@ -598,17 +601,18 @@ MainComponent::MainComponent()
         if (track == nullptr || track->type != waveform::TrackType::Midi)
             return;
 
+        const int index = instrumentBox_.getSelectedId() - 1;
+
+        if (index < 0 || index > 4)
+            return;
+
         const waveform::InstrumentKind kinds[] = {
             waveform::InstrumentKind::Synth,
             waveform::InstrumentKind::Sampler,
             waveform::InstrumentKind::Fm,
-            waveform::InstrumentKind::Drum
+            waveform::InstrumentKind::Drum,
+            waveform::InstrumentKind::Wavetable
         };
-        const int index = instrumentBox_.getSelectedId() - 1;
-
-        if (index < 0 || index > 3)
-            return;
-
         history_.execute (project_, std::make_unique<waveform::SetInstrumentCommand> (track->id, kinds[index]));
         syncEngine();
         refreshHistoryButtons();
@@ -766,6 +770,13 @@ MainComponent::MainComponent()
         menu.addItem (6, "Utility");
         menu.addItem (7, "Chorus");
         menu.addItem (8, "Saturator");
+        menu.addItem (9, "Auto Filter");
+        menu.addItem (10, "Phaser");
+        menu.addItem (11, "Flanger");
+        menu.addItem (12, "Gate");
+        menu.addItem (13, "Glue Compressor");
+        menu.addItem (14, "Redux");
+        menu.addItem (15, "Spectrum");
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addEffectButton_), [this] (int result)
         {
             waveform::EffectKind kind = waveform::EffectKind::Eq;
@@ -779,6 +790,13 @@ MainComponent::MainComponent()
                 case 6: kind = waveform::EffectKind::Utility; break;
                 case 7: kind = waveform::EffectKind::Chorus; break;
                 case 8: kind = waveform::EffectKind::Saturator; break;
+                case 9: kind = waveform::EffectKind::AutoFilter; break;
+                case 10: kind = waveform::EffectKind::Phaser; break;
+                case 11: kind = waveform::EffectKind::Flanger; break;
+                case 12: kind = waveform::EffectKind::Gate; break;
+                case 13: kind = waveform::EffectKind::Glue; break;
+                case 14: kind = waveform::EffectKind::Redux; break;
+                case 15: kind = waveform::EffectKind::Spectrum; break;
                 case 1: break;
                 default: return;
             }
@@ -1291,6 +1309,184 @@ bool MainComponent::keyPressed (const juce::KeyPress& key)
 
         togglePlay();
         return true;
+    }
+
+    if (key.getModifiers().isShiftDown() && ! key.getModifiers().isCommandDown())
+    {
+        const int note = waveform::noteFromTypingKey (key.getTextCharacter(), keyboardOctave_);
+
+        if (note >= 0)
+        {
+            if (heldTypingNote_ >= 0)
+                engine_.typingNote (heldTypingNote_, false);
+
+            heldTypingNote_ = note;
+            engine_.typingNote (note, true);
+            return true;
+        }
+    }
+
+    if (auto* focused = juce::Component::getCurrentlyFocusedComponent())
+        if (focused->findParentComponentOfClass<juce::TextEditor>() != nullptr)
+            return false;
+
+    if (key == juce::KeyPress ('p', 0, 0))
+    {
+        project_.punchEnabled = ! project_.punchEnabled;
+        project_.punchStartQuarter = project_.loopStartQuarterNotes;
+        project_.punchEndQuarter = project_.loopEndQuarterNotes;
+        setStatus (project_.punchEnabled ? "Punch uses the loop region." : "Punch is off.");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('t', 0, 0))
+    {
+        const double quarter = engine_.playbackInfo().sampleRate > 0
+                                   ? waveform::Timing::quarterNotesFromSamples (engine_.playbackInfo().positionSamples, engine_.playbackInfo().sampleRate, project_.tempoBpm)
+                                   : 0.0;
+        waveform::TimeSignature signature { project_.timeSignature.numerator == 4 ? 3 : project_.timeSignature.numerator == 3 ? 6 : 4,
+                                            project_.timeSignature.numerator == 3 ? 8 : 4 };
+        project_.signatures.push_back (waveform::SignaturePoint { quarter, signature });
+        project_.timeSignature = signature;
+        engine_.setTimeSignature (signature.numerator, signature.denominator);
+        setStatus ("Time signature from here is " + juce::String (signature.numerator) + "/" + juce::String (signature.denominator) + ".");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('c', 0, 0))
+    {
+        auto* track = selectedTrack();
+
+        if (track == nullptr)
+            return true;
+
+        waveform::AudioClip* selected = nullptr;
+        waveform::AudioClip* next = nullptr;
+
+        for (auto& clip : track->clips)
+        {
+            auto* audio = std::get_if<waveform::AudioClip> (&clip);
+
+            if (audio == nullptr)
+                continue;
+
+            if (audio->id == selectedClipId_)
+                selected = audio;
+            else if (selected != nullptr && next == nullptr && audio->startQuarterNotes >= selected->startQuarterNotes)
+                next = audio;
+        }
+
+        if (selected == nullptr || next == nullptr)
+        {
+            setStatus ("Select an audio clip that has another clip after it.");
+            return true;
+        }
+
+        waveform::crossfadeAdjacent (*selected, *next, project_.tempoBpm);
+        syncEngine();
+        refreshArrangement();
+        setStatus ("Crossfade set between the adjacent clips.");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('f', 0, 0))
+    {
+        auto* track = selectedTrack();
+        waveform::AudioClip* audio = nullptr;
+
+        if (track != nullptr)
+            for (auto& clip : track->clips)
+                if (auto* candidate = std::get_if<waveform::AudioClip> (&clip); candidate != nullptr && candidate->id == selectedClipId_)
+                    audio = candidate;
+
+        if (audio == nullptr)
+        {
+            setStatus ("Select an audio clip to freeze.");
+            return true;
+        }
+
+        std::string error;
+        const double rate = engine_.playbackInfo().sampleRate > 0 ? engine_.playbackInfo().sampleRate : 48000.0;
+        const auto loaded = engine_.library().load (audio->file, rate, error);
+
+        if (loaded == nullptr || loaded->left.empty())
+        {
+            setStatus (error.empty() ? "Cannot read the clip to freeze." : juce::String (error));
+            return true;
+        }
+
+        const int frames = static_cast<int> (loaded->frames());
+        std::vector<float> frozen (static_cast<std::size_t> (frames));
+        const int fadeIn = static_cast<int> (audio->fadeInSeconds * loaded->sampleRate);
+        const int fadeOut = static_cast<int> (audio->fadeOutSeconds * loaded->sampleRate);
+        waveform::freezeClipSamples (loaded->left.data(), frames, waveform::dbToLinear (audio->gainDb), fadeIn, fadeOut, frozen.data());
+        const auto directory = projectFile_.existsAsFile()
+                                   ? projectFile_.getParentDirectory().getChildFile ("Freezes")
+                                   : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("Waveform Studio").getChildFile ("Freezes");
+        directory.createDirectory();
+        const auto file = directory.getChildFile (juce::String (audio->name) + " freeze.wav");
+
+        if (! waveform::writeStereoWav (file.getFullPathName().toStdString(), loaded->sampleRate, frozen.data(), frozen.data(), loaded->frames(), error))
+        {
+            setStatus (error.empty() ? "Could not write the freeze." : juce::String (error));
+            return true;
+        }
+
+        audio->file = file.getFullPathName().toStdString();
+        audio->gainDb = 0.0;
+        audio->fadeInSeconds = 0.0;
+        audio->fadeOutSeconds = 0.0;
+        audio->warp.clear();
+        audio->offsetSeconds = 0.0;
+        audio->lengthSeconds = static_cast<double> (frames) / loaded->sampleRate;
+        syncEngine();
+        refreshArrangement();
+        setStatus ("Froze the clip in place.");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('b', 0, 0))
+    {
+        auto* track = selectedTrack();
+
+        if (track == nullptr)
+            return true;
+
+        track->crossfaderSide = track->crossfaderSide == 0 ? 1 : track->crossfaderSide == 1 ? 2 : 0;
+        if (project_.crossfader == 0.0f)
+            project_.crossfader = 0.0f;
+
+        syncEngine();
+        setStatus (track->crossfaderSide == 0 ? "Track leaves the crossfader."
+                                              : track->crossfaderSide == 1 ? "Track is on crossfader A."
+                                                                            : "Track is on crossfader B.");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('-', 0, 0) || key == juce::KeyPress ('=', 0, 0))
+    {
+        project_.crossfader = std::clamp (project_.crossfader + (key.getTextCharacter() == '=' ? 0.25f : -0.25f), 0.0f, 1.0f);
+        syncEngine();
+        setStatus ("Crossfader " + juce::String (juce::roundToInt (project_.crossfader * 100.0f)) + "% toward B.");
+        return true;
+    }
+
+    if (key == juce::KeyPress ('[', 0, 0) || key == juce::KeyPress (']', 0, 0))
+    {
+        keyboardOctave_ = std::clamp (keyboardOctave_ + (key.getTextCharacter() == ']' ? 1 : -1), 1, 7);
+        setStatus ("Typing octave " + juce::String (keyboardOctave_) + ".");
+        return true;
+    }
+
+    return false;
+}
+
+bool MainComponent::keyStateChanged (bool isKeyDown)
+{
+    if (! isKeyDown && heldTypingNote_ >= 0)
+    {
+        engine_.typingNote (heldTypingNote_, false);
+        heldTypingNote_ = -1;
     }
 
     return false;
@@ -2271,6 +2467,28 @@ void MainComponent::commitTake()
         }
 
         clip.lengthQuarterNotes = end + 0.25;
+        waveform::applyPunch (clip.notes, waveform::PunchSpan { project_.punchEnabled, project_.punchStartQuarter, project_.punchEndQuarter });
+
+        if (! selectedClipId_.empty())
+        {
+            for (auto& existing : project_.tracks[static_cast<std::size_t> (midi.trackIndex)].clips)
+            {
+                auto* midiClip = std::get_if<waveform::MidiClip> (&existing);
+
+                if (midiClip == nullptr || midiClip->id != selectedClipId_)
+                    continue;
+
+                auto notes = midiClip->notes;
+                waveform::MidiClip overdub = *midiClip;
+                waveform::overdubNotes (overdub, clip.notes.data(), static_cast<int> (clip.notes.size()));
+                history_.execute (project_, std::make_unique<waveform::SetMidiNotesCommand> (project_.tracks[static_cast<std::size_t> (midi.trackIndex)].id, midiClip->id, std::move (overdub.notes)));
+                syncEngine();
+                refreshHistoryButtons();
+                refreshPiano();
+                setStatus ("Overdubbed into the selected MIDI clip.");
+                return;
+            }
+        }
 
         if (session_.isVisible() && selectedScene_ >= 0)
         {
@@ -2891,15 +3109,15 @@ void MainComponent::applyLearnedControl()
     {
         learningControl_ = false;
         controlMap_.erase (std::remove_if (controlMap_.begin(), controlMap_.end(), [cc] (const waveform::ControlMapping& mapping) { return mapping.cc == cc; }), controlMap_.end());
-        controlMap_.push_back (waveform::ControlMapping { cc, "mixer.gainDb" });
-        setStatus ("CC " + juce::String (cc) + " controls the selected track volume.");
+        controlMap_.push_back (waveform::ControlMapping { cc, automationParameter_ });
+        setStatus ("CC " + juce::String (cc) + " controls " + juce::String (automationParameter_) + ".");
 
         if (auto* content = dynamic_cast<MapContent*> (midiMapWindow_ != nullptr ? midiMapWindow_->getContentComponent() : nullptr))
         {
             juce::String text;
 
             for (const auto& mapping : controlMap_)
-                text << "CC " << mapping.cc << "  ->  volume\n";
+                text << "CC " << mapping.cc << "  ->  " << mapping.parameter << "\n";
 
             content->setBody (text);
         }
@@ -2973,6 +3191,8 @@ void MainComponent::applyModelToControls()
             id = 3;
         else if (track->instrument == waveform::InstrumentKind::Drum)
             id = 4;
+        else if (track->instrument == waveform::InstrumentKind::Wavetable)
+            id = 5;
 
         instrumentBox_.setSelectedId (id, juce::dontSendNotification);
     }

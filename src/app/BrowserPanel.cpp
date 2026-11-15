@@ -2,6 +2,9 @@
 
 #include "StudioLookAndFeel.hpp"
 #include "waveform/media.hpp"
+#include "waveform/phase8.hpp"
+
+#include <map>
 
 namespace
 {
@@ -66,6 +69,9 @@ BrowserPanel::BrowserPanel()
     title_.setText ("Browser", juce::dontSendNotification);
     title_.setFont (juce::Font (juce::FontOptions (15.0f)));
     addAndMakeVisible (title_);
+    search_.setTextToShowWhenEmpty ("Search name or tag", juce::Colour (waveform::StudioLookAndFeel::kDim));
+    search_.onTextChange = [this] { rebuild(); };
+    addAndMakeVisible (search_);
     addAndMakeVisible (folderButton_);
     addAndMakeVisible (viewport_);
     viewport_.setViewedComponent (&list_, false);
@@ -92,13 +98,40 @@ void BrowserPanel::rebuild()
 
     if (folder_.isDirectory())
     {
+        std::map<std::string, std::string> tags;
+        const auto tagFile = folder_.getChildFile ("tags.txt");
+
+        if (tagFile.existsAsFile())
+        {
+            for (const auto& line : juce::StringArray::fromLines (tagFile.loadFileAsString()))
+            {
+                const auto trimmed = line.trim();
+
+                if (trimmed.isEmpty() || trimmed.startsWithChar ('#'))
+                    continue;
+
+                const auto space = trimmed.indexOfChar (' ');
+                const auto name = (space < 0 ? trimmed : trimmed.substring (0, space)).toStdString();
+                const auto words = (space < 0 ? juce::String() : trimmed.substring (space + 1)).toStdString();
+                tags[name] = words;
+            }
+        }
+
         juce::Array<juce::File> files;
         folder_.findChildFiles (files, juce::File::findFiles, false);
         files.sort();
+        const auto query = search_.getText().toStdString();
 
         for (const auto& file : files)
         {
             if (! isAudio (file))
+                continue;
+
+            const auto name = file.getFileName().toStdString();
+            const auto found = tags.find (name);
+            const waveform::MediaRecord record { name.c_str(), found == tags.end() ? nullptr : found->second.c_str() };
+
+            if (! waveform::mediaMatches (record, query.c_str()))
                 continue;
 
             auto row = std::make_unique<Row> (file, onPreview);
@@ -128,6 +161,8 @@ void BrowserPanel::resized()
     auto header = area.removeFromTop (26);
     folderButton_.setBounds (header.removeFromRight (72));
     title_.setBounds (header);
+    area.removeFromTop (4);
+    search_.setBounds (area.removeFromTop (24));
     area.removeFromTop (6);
     viewport_.setBounds (area);
     const int height = 26;

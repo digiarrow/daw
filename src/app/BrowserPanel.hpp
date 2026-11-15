@@ -26,6 +26,7 @@ private:
 
     juce::File folder_;
     juce::Label title_;
+    juce::TextEditor search_;
     juce::TextButton folderButton_ { "Folder" };
     juce::Viewport viewport_;
     juce::Component list_;
