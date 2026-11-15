@@ -35,6 +35,28 @@ void writeAutomation (const AutomationLane& lane,
 /// Multiplies a stereo block by a per-sample gain. `gain` may be null.
 void applyGainCurve (float* left, float* right, const float* gain, int frames) noexcept;
 
+/// Constant-power pan per sample. `pan` is -1..1. Null leaves the block unchanged.
+void applyPanCurve (float* left, float* right, const float* pan, int frames) noexcept;
+
+enum class AutomationKind
+{
+    None,
+    GainDb,
+    Pan,
+    Cutoff,
+    Effect
+};
+
+struct AutomationBinding
+{
+    AutomationKind kind = AutomationKind::None;
+    int effect = -1;
+    int parameter = -1; ///< 0..5 for an effect lane.
+};
+
+/// Parses `mixer.gainDb`, `mixer.pan`, `synth.cutoffHz`, and `effect.<n>.p<0-5>`.
+[[nodiscard]] AutomationBinding bindAutomationParameter (const char* name) noexcept;
+
 /// Clip envelope. `position` is clip-local (seconds or quarters, matching the points).
 [[nodiscard]] double clipEnvelopeAt (const AutomationPoint* points, int count, double position, double fallback) noexcept;
 

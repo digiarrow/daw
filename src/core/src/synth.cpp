@@ -63,14 +63,14 @@ float envelopeAt (double seconds, double sinceRelease, const SynthPatch& patch) 
     return heldLevel (seconds, patch);
 }
 
-float filterSample (float input, int note, const SynthPatch& patch, double sampleRate, SynthVoiceMemory& memory) noexcept
+float filterSample (float input, int note, float cutoffHz, float resonance, double sampleRate, SynthVoiceMemory& memory) noexcept
 {
     if (note < 0 || note > 127 || ! (sampleRate > 0.0))
         return input;
 
-    const float cutoff = std::clamp (static_cast<float> (patch.cutoffHz), 40.0f, static_cast<float> (sampleRate * 0.45));
+    const float cutoff = std::clamp (cutoffHz, 40.0f, static_cast<float> (sampleRate * 0.45));
     const float f = 2.0f * std::sin (kPi * cutoff / static_cast<float> (sampleRate));
-    const float q = std::clamp (1.0f - static_cast<float> (patch.resonance), 0.08f, 1.0f);
+    const float q = std::clamp (1.0f - resonance, 0.08f, 1.0f);
     float& low = memory.low[note];
     float& band = memory.band[note];
     low += f * band;
@@ -98,7 +98,10 @@ void renderSynthNotes (const SoundingNote* notes,
                        float leftGain,
                        float rightGain,
                        float* left,
-                       float* right) noexcept
+                       float* right,
+                       const AutomationLane* cutoff,
+                       double startQuarter,
+                       double tempoBpm) noexcept
 {
     if (notes == nullptr || left == nullptr || right == nullptr || frames <= 0 || noteCount <= 0 || ! (sampleRate > 0.0))
         return;
@@ -131,7 +134,11 @@ void renderSynthNotes (const SoundingNote* notes,
             const float primary = oscillator (patch.wave, frequency * sinceOn);
             const float second = oscillator (patch.wave, frequency * detune * sinceOn);
             const float mixed = (primary * 0.65f + second * 0.35f) * env * velocity;
-            const float filtered = filterSample (mixed, note.note, patch, sampleRate, memory);
+            const double quarter = startQuarter + (tempoBpm > 0.0 ? (tempoBpm / 60.0) / sampleRate : 0.0) * static_cast<double> (frame);
+            const float cutoffHz = cutoff != nullptr
+                                       ? static_cast<float> (automationAt (*cutoff, quarter, patch.cutoffHz))
+                                       : static_cast<float> (patch.cutoffHz);
+            const float filtered = filterSample (mixed, note.note, cutoffHz, static_cast<float> (patch.resonance), sampleRate, memory);
             const float sample = filtered * 0.22f;
             left[frame] += sample * leftGain;
             right[frame] += sample * rightGain;

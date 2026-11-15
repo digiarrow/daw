@@ -193,6 +193,41 @@ double tempoForScene (const double* sceneTempoBpm, int sceneCount, int activeSce
     return tempo > 0.0 ? tempo : projectTempo;
 }
 
+SceneTempoDecision holdSceneTempo (SceneTempoHold hold,
+                                   double transportTempo,
+                                   int activeScene,
+                                   const double* sceneTempoBpm,
+                                   int sceneCount,
+                                   double projectTempo) noexcept
+{
+    SceneTempoDecision decision;
+    decision.hold = hold;
+
+    if (activeScene >= 0)
+    {
+        const double sceneTempo = tempoForScene (sceneTempoBpm, sceneCount, activeScene, projectTempo);
+
+        if (! (hold.applied > 0.0))
+            decision.hold.restore = transportTempo;
+        else if (std::abs (transportTempo - hold.applied) > 0.05)
+            decision.hold.restore = transportTempo;
+
+        decision.hold.applied = sceneTempo;
+        decision.playback = sceneTempo;
+        return decision;
+    }
+
+    if (hold.applied > 0.0)
+    {
+        decision.playback = hold.restore;
+        decision.hold.applied = 0.0;
+        return decision;
+    }
+
+    decision.playback = transportTempo;
+    return decision;
+}
+
 void recordIntoSessionSlot (Track& track, int scene, Clip clip)
 {
     const int row = std::clamp (scene, 0, kSessionScenes - 1);

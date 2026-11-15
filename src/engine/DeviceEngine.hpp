@@ -109,6 +109,8 @@ public:
 
     /// `scene` of -1 returns the track to the arrangement. `quantize` is 0 now, 1 next beat, 2 next bar.
     bool launchSession (int trackIndex, int scene, int quantize, int mode = 0, int follow = 0, int afterHundredths = 400, int repeatHundredths = 100);
+    /// Ends a gate-mode slot. Other launch modes ignore the release.
+    bool releaseSession (int trackIndex);
     /// Plays a short stereo buffer through the open device. Message thread only.
     void playPreview (std::vector<float> left, std::vector<float> right);
     [[nodiscard]] int sessionScene (int trackIndex) const noexcept;
@@ -168,6 +170,7 @@ private:
     int collectLiveNotes (SoundingNote* destination, int capacity) const noexcept;
     void advanceLiveNotes (int frames) noexcept;
     void applySession (const EngineCommand& command) noexcept;
+    void releaseSessionVoice (const EngineCommand& command) noexcept;
     void fireSession (std::int64_t timelineSample) noexcept;
     [[nodiscard]] std::int64_t nextSessionSample (std::int64_t after) const noexcept;
     void publishSession() noexcept;

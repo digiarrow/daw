@@ -17,6 +17,7 @@ public:
                    const std::string& selectedClipId);
 
     std::function<void (int trackIndex, int scene)> onLaunch;
+    std::function<void (int trackIndex, int scene)> onRelease;
     std::function<void (int scene)> onLaunchScene;
     std::function<void (int trackIndex)> onReturn;
     std::function<void (int trackIndex, int scene)> onCreate;
@@ -25,6 +26,7 @@ public:
 
     void paint (juce::Graphics& graphics) override;
     void mouseDown (const juce::MouseEvent& event) override;
+    void mouseUp (const juce::MouseEvent& event) override;
     void mouseDoubleClick (const juce::MouseEvent& event) override;
 
 private:
@@ -41,6 +43,8 @@ private:
     [[nodiscard]] juce::Rectangle<int> cellBounds (int track, int scene) const;
 
     const waveform::Project* project_ = nullptr;
+    int pressedTrack_ = -1;
+    int pressedScene_ = -1;
     std::array<int, 64> active_ {};
     std::array<int, 64> pending_ {};
     std::string selectedClipId_;

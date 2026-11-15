@@ -30,7 +30,8 @@ enum class EngineCommandType : std::uint8_t
     SetMetronome,       ///< a = 0 or 1  (handled by the device, ignored by Transport)
     SetTestTone,        ///< a = 0 or 1  (handled by the device, ignored by Transport)
     StartRecord,        ///< a = track index, b = count-in bars, c = 1 for MIDI, 0 for audio
-    LaunchSession       ///< a = track index, b = scene or -1, c = 0 immediate, 1 beat, 2 bar
+    LaunchSession,      ///< a = track index, b = scene or -1, c = 0 immediate, 1 beat, 2 bar
+    ReleaseSession      ///< a = track index. Stops a gate-mode slot.
 };
 
 struct EngineCommand

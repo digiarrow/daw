@@ -423,7 +423,8 @@ private:
 class SetClipMarkersCommand : public EditCommand
 {
 public:
-    SetClipMarkersCommand (std::string trackId, std::string clipId, std::vector<WarpMarker> warp, std::vector<CompSegment> comp);
+    /// `warpMode` below 0 leaves the clip's mode unchanged.
+    SetClipMarkersCommand (std::string trackId, std::string clipId, std::vector<WarpMarker> warp, std::vector<CompSegment> comp, int warpMode = -1);
     void apply (Project& project) override;
     void revert (Project& project) override;
     [[nodiscard]] const char* name() const override;
@@ -435,6 +436,41 @@ private:
     std::vector<CompSegment> comp_;
     std::vector<WarpMarker> previousWarp_;
     std::vector<CompSegment> previousComp_;
+    int warpMode_ = -1;
+    int previousWarpMode_ = 2;
+    bool applied_ = false;
+};
+
+class SetClipEnvelopeCommand : public EditCommand
+{
+public:
+    SetClipEnvelopeCommand (std::string trackId, std::string clipId, std::vector<AutomationPoint> envelope);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    std::string clipId_;
+    std::vector<AutomationPoint> next_;
+    std::vector<AutomationPoint> previous_;
+    bool applied_ = false;
+};
+
+class RecordSessionSlotCommand : public EditCommand
+{
+public:
+    RecordSessionSlotCommand (std::string trackId, int scene, Clip clip);
+    void apply (Project& project) override;
+    void revert (Project& project) override;
+    [[nodiscard]] const char* name() const override;
+
+private:
+    std::string trackId_;
+    int scene_ = 0;
+    Clip next_;
+    SessionSlot previous_ {};
+    bool hadPrevious_ = false;
     bool applied_ = false;
 };
 

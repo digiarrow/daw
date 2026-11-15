@@ -159,6 +159,8 @@ juce::Rectangle<int> SessionView::cellBounds (int track, int scene) const
 
 void SessionView::mouseDown (const juce::MouseEvent& event)
 {
+    pressedTrack_ = -1;
+    pressedScene_ = -1;
     const auto cell = cellAt (event.getPosition());
 
     if (cell.sceneButton && onLaunchScene)
@@ -180,8 +182,21 @@ void SessionView::mouseDown (const juce::MouseEvent& event)
             onSelect (cell.track, cell.scene);
 
         if (slotFor (project_->tracks[static_cast<std::size_t> (cell.track)], cell.scene) != nullptr && onLaunch)
+        {
+            pressedTrack_ = cell.track;
+            pressedScene_ = cell.scene;
             onLaunch (cell.track, cell.scene);
+        }
     }
+}
+
+void SessionView::mouseUp (const juce::MouseEvent&)
+{
+    if (pressedTrack_ >= 0 && onRelease)
+        onRelease (pressedTrack_, pressedScene_);
+
+    pressedTrack_ = -1;
+    pressedScene_ = -1;
 }
 
 void SessionView::mouseDoubleClick (const juce::MouseEvent& event)

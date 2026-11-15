@@ -232,6 +232,7 @@ if(WAVEFORM_BUILD_TESTS)
     add_executable(waveform_tests
         tests/test_clips.cpp
         tests/test_phase6.cpp
+        tests/test_phase7.cpp
         tests/test_effects.cpp
         tests/test_later.cpp
         tests/test_midi_effects.cpp
@@ -283,6 +284,14 @@ install(TARGETS WaveformStudio
     BUNDLE DESTINATION .
     RUNTIME DESTINATION .
 )
+
+# JUCE installs juceaide under bin/JUCE-*. The packaged app should not ship that helper.
+install(CODE [[
+    file(GLOB waveform_juce_tool_dirs "${CMAKE_INSTALL_PREFIX}/bin/JUCE-*")
+    if(waveform_juce_tool_dirs)
+        file(REMOVE_RECURSE ${waveform_juce_tool_dirs})
+    endif()
+]])
 
 set(CPACK_PACKAGE_NAME "WaveformStudio")
 set(CPACK_PACKAGE_VENDOR "Waveform Studio")

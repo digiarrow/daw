@@ -235,6 +235,17 @@ bool DeviceEngine::launchSession (int trackIndex, int scene, int quantize, int m
     return push (command);
 }
 
+bool DeviceEngine::releaseSession (int trackIndex)
+{
+    if (trackIndex < 0 || trackIndex >= 64)
+        return false;
+
+    EngineCommand command;
+    command.type = EngineCommandType::ReleaseSession;
+    command.a = trackIndex;
+    return push (command);
+}
+
 int DeviceEngine::sessionScene (int trackIndex) const noexcept
 {
     if (trackIndex < 0 || trackIndex >= 64)
@@ -316,6 +327,27 @@ void DeviceEngine::applySession (const EngineCommand& command) noexcept
 
     voice.pending = command.b;
     voice.pendingSample = sample;
+}
+
+void DeviceEngine::releaseSessionVoice (const EngineCommand& command) noexcept
+{
+    if (command.type != EngineCommandType::ReleaseSession)
+        return;
+
+    const int track = command.a;
+
+    if (track < 0 || track >= 64)
+        return;
+
+    auto& voice = session_[static_cast<std::size_t> (track)];
+
+    if (voice.launch != ClipLaunchMode::Gate || ! voice.gateHeld)
+        return;
+
+    voice.gateHeld = false;
+    voice.active = -1;
+    voice.pending = -2;
+    voice.playhead = 0;
 }
 
 void DeviceEngine::fireSession (std::int64_t timelineSample) noexcept
@@ -534,6 +566,7 @@ void DeviceEngine::applyLocal (const EngineCommand& command) noexcept
         case EngineCommandType::SetMetronome: metronome_ = command.a != 0; break;
         case EngineCommandType::SetTestTone:  testToneEnabled_ = command.a != 0; break;
         case EngineCommandType::LaunchSession: applySession (command); break;
+        case EngineCommandType::ReleaseSession: releaseSessionVoice (command); break;
         default:                              transport_.apply (command); break;
     }
 
@@ -565,6 +598,9 @@ void DeviceEngine::drainCommands() noexcept
                 break;
             case EngineCommandType::LaunchSession:
                 applySession (command);
+                break;
+            case EngineCommandType::ReleaseSession:
+                releaseSessionVoice (command);
                 break;
             case EngineCommandType::StartRecord:
                 if (! recording_ && ! countingIn_)
@@ -993,29 +1029,18 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                 }
             }
 
-            if (scene >= 0)
+            const SceneTempoDecision decision = holdSceneTempo (SceneTempoHold { sceneTempoApplied_, tempoBeforeScene_ },
+                                                                tempo, scene, graph->sceneTempoBpm, kSessionScenes, graph->projectTempo);
+            sceneTempoApplied_ = decision.hold.applied;
+            tempoBeforeScene_ = decision.hold.restore;
+
+            if (std::abs (decision.playback - tempo) > 0.05)
             {
-                const double sceneTempo = tempoForScene (graph->sceneTempoBpm, kSessionScenes, scene, graph->projectTempo);
-
-                if (sceneTempoApplied_ == 0.0)
-                    tempoBeforeScene_ = tempo;
-
-                if (std::abs (sceneTempo - tempo) > 0.05)
-                {
-                    transport_.setTempoBpm (sceneTempo);
-                    tempoMilli_.store (Transport::tempoToMilli (sceneTempo), std::memory_order_relaxed);
-                }
-
-                sceneTempoApplied_ = sceneTempo;
-                tempo = sceneTempo;
+                transport_.setTempoBpm (decision.playback);
+                tempoMilli_.store (Transport::tempoToMilli (decision.playback), std::memory_order_relaxed);
             }
-            else if (sceneTempoApplied_ != 0.0)
-            {
-                transport_.setTempoBpm (tempoBeforeScene_);
-                tempoMilli_.store (Transport::tempoToMilli (tempoBeforeScene_), std::memory_order_relaxed);
-                tempo = tempoBeforeScene_;
-                sceneTempoApplied_ = 0.0;
-            }
+
+            tempo = decision.playback;
         }
         const auto signature = transport_.timeSignature();
         int done = 0;

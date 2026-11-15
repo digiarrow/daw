@@ -1,9 +1,11 @@
 #include "waveform/automation.hpp"
 
+#include "waveform/mix.hpp"
 #include "waveform/timing.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace waveform
 {
@@ -72,6 +74,83 @@ void applyGainCurve (float* left, float* right, const float* gain, int frames) n
         if (right != nullptr)
             right[index] *= gain[index];
     }
+}
+
+void applyPanCurve (float* left, float* right, const float* pan, int frames) noexcept
+{
+    if (pan == nullptr || frames <= 0 || left == nullptr || right == nullptr)
+        return;
+
+    for (int index = 0; index < frames; ++index)
+    {
+        const PanGains gains = constantPowerPan (pan[index]);
+        left[index] *= gains.left;
+        right[index] *= gains.right;
+    }
+}
+
+AutomationBinding bindAutomationParameter (const char* name) noexcept
+{
+    AutomationBinding binding;
+
+    if (name == nullptr)
+        return binding;
+
+    if (std::strcmp (name, "mixer.gainDb") == 0)
+    {
+        binding.kind = AutomationKind::GainDb;
+        return binding;
+    }
+
+    if (std::strcmp (name, "mixer.pan") == 0)
+    {
+        binding.kind = AutomationKind::Pan;
+        return binding;
+    }
+
+    if (std::strcmp (name, "synth.cutoffHz") == 0)
+    {
+        binding.kind = AutomationKind::Cutoff;
+        return binding;
+    }
+
+    constexpr const char* prefix = "effect.";
+
+    if (std::strncmp (name, prefix, 7) != 0)
+        return binding;
+
+    const char* cursor = name + 7;
+    int effect = 0;
+    bool sawDigit = false;
+
+    while (*cursor >= '0' && *cursor <= '9')
+    {
+        sawDigit = true;
+        effect = effect * 10 + (*cursor - '0');
+        ++cursor;
+    }
+
+    if (! sawDigit || cursor[0] != '.' || cursor[1] != 'p')
+        return binding;
+
+    cursor += 2;
+    int parameter = 0;
+    sawDigit = false;
+
+    while (*cursor >= '0' && *cursor <= '9')
+    {
+        sawDigit = true;
+        parameter = parameter * 10 + (*cursor - '0');
+        ++cursor;
+    }
+
+    if (! sawDigit || *cursor != '\0' || parameter > 5)
+        return binding;
+
+    binding.kind = AutomationKind::Effect;
+    binding.effect = effect;
+    binding.parameter = parameter;
+    return binding;
 }
 
 double clipEnvelopeAt (const AutomationPoint* points, int count, double position, double fallback) noexcept

@@ -82,6 +82,26 @@ struct LaunchResult
 /// Scene tempo, or the project tempo when the scene has no override.
 [[nodiscard]] double tempoForScene (const double* sceneTempoBpm, int sceneCount, int activeScene, double projectTempo) noexcept;
 
+struct SceneTempoHold
+{
+    double applied = 0.0; ///< Scene tempo currently replacing the transport. 0 means none.
+    double restore = 120.0; ///< Tempo to put back when every slot stops, including an edit made during the scene.
+};
+
+struct SceneTempoDecision
+{
+    double playback = 120.0;
+    SceneTempoHold hold;
+};
+
+/// Playback tempo for one block. A transport tempo that differs from `hold.applied` is a user edit and is kept for later.
+[[nodiscard]] SceneTempoDecision holdSceneTempo (SceneTempoHold hold,
+                                                 double transportTempo,
+                                                 int activeScene,
+                                                 const double* sceneTempoBpm,
+                                                 int sceneCount,
+                                                 double projectTempo) noexcept;
+
 /// Replaces or creates the clip in a session slot. Arrangement clips are left alone.
 void recordIntoSessionSlot (Track& track, int scene, Clip clip);
 

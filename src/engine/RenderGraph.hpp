@@ -188,7 +188,11 @@ void renderTrackInstrument (const RenderTrack& track,
                            float leftGain,
                            float rightGain,
                            float* left,
-                           float* right) noexcept;
+                           float* right,
+                           int trackIndex = 0,
+                           const AutomationLane* cutoff = nullptr,
+                           double startQuarter = 0.0,
+                           double tempoBpm = 0.0) noexcept;
 
 /// Mixes one contiguous timeline region into `left`/`right`, then adds metronome and test tone.
 /// Clears the destination first. Does not allocate. `tone` may be null when `testTone` is false.

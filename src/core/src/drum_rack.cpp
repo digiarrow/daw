@@ -107,4 +107,43 @@ void renderDrumRack (PadVoice* voices,
     }
 }
 
+PadVoice* drumVoicePool (int trackIndex) noexcept
+{
+    static PadVoice pools[64][4] {};
+    const int index = std::clamp (trackIndex, 0, 63);
+    return pools[index];
+}
+
+void mixDrumRack (PadVoice* voices,
+                  int voiceCount,
+                  const DrumRack& rack,
+                  int frames,
+                  double sampleRate,
+                  float leftGain,
+                  float rightGain,
+                  float* left,
+                  float* right) noexcept
+{
+    if (left == nullptr || right == nullptr || frames <= 0)
+        return;
+
+    constexpr int kSlice = 256;
+
+    for (int rendered = 0; rendered < frames;)
+    {
+        const int count = std::min (kSlice, frames - rendered);
+        float sliceLeft[kSlice] {};
+        float sliceRight[kSlice] {};
+        renderDrumRack (voices, voiceCount, rack, count, sampleRate, sliceLeft, sliceRight);
+
+        for (int index = 0; index < count; ++index)
+        {
+            left[rendered + index] += sliceLeft[index] * leftGain;
+            right[rendered + index] += sliceRight[index] * rightGain;
+        }
+
+        rendered += count;
+    }
+}
+
 } // namespace waveform

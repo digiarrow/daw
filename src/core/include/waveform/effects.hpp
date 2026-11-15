@@ -1,5 +1,7 @@
 #pragma once
 
+#include "waveform/automation.hpp"
+
 #include <cstdint>
 
 namespace waveform
@@ -77,5 +79,23 @@ void processInserts (const EffectSlot* slots,
                      double sampleRate,
                      const float* sidechainLeft = nullptr,
                      const float* sidechainRight = nullptr) noexcept;
+
+void setEffectParameter (EffectSlot& slot, int parameter, double value) noexcept;
+
+/// One sample at a time so an effect lane can change p0..p5 on every frame.
+/// `lanes`/`laneCount` name parameters such as `effect.0.p0`. Other lanes are ignored.
+void processAutomatedInserts (const EffectSlot* slots,
+                              int slotCount,
+                              EffectState* states,
+                              float* left,
+                              float* right,
+                              int frames,
+                              double sampleRate,
+                              const float* sidechainLeft,
+                              const float* sidechainRight,
+                              const AutomationLane* lanes,
+                              int laneCount,
+                              double startQuarter,
+                              double bpm) noexcept;
 
 } // namespace waveform

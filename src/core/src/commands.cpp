@@ -1,6 +1,7 @@
 #include "waveform/commands.hpp"
 #include "waveform/clips.hpp"
 #include "waveform/routing.hpp"
+#include "waveform/session.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1196,8 +1197,8 @@ AudioClip* findAudioClip (Project& project, const std::string& trackId, const st
 
 } // namespace
 
-SetClipMarkersCommand::SetClipMarkersCommand (std::string trackId, std::string clipId, std::vector<WarpMarker> warp, std::vector<CompSegment> comp)
-    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), warp_ (std::move (warp)), comp_ (std::move (comp))
+SetClipMarkersCommand::SetClipMarkersCommand (std::string trackId, std::string clipId, std::vector<WarpMarker> warp, std::vector<CompSegment> comp, int warpMode)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), warp_ (std::move (warp)), comp_ (std::move (comp)), warpMode_ (warpMode)
 {
 }
 
@@ -1211,8 +1212,12 @@ void SetClipMarkersCommand::apply (Project& project)
 
     previousWarp_ = clip->warp;
     previousComp_ = clip->comp;
+    previousWarpMode_ = clip->warpMode;
     clip->warp = warp_;
     clip->comp = comp_;
+
+    if (warpMode_ >= 0)
+        clip->warpMode = std::clamp (warpMode_, 0, 2);
 }
 
 void SetClipMarkersCommand::revert (Project& project)
@@ -1224,8 +1229,120 @@ void SetClipMarkersCommand::revert (Project& project)
     {
         clip->warp = previousWarp_;
         clip->comp = previousComp_;
+
+        if (warpMode_ >= 0)
+            clip->warpMode = previousWarpMode_;
     }
 }
+
+namespace
+{
+
+std::vector<AutomationPoint>* findEnvelope (Project& project, const std::string& trackId, const std::string& clipId)
+{
+    auto* track = findTrack (project, trackId);
+
+    if (track == nullptr)
+        return nullptr;
+
+    for (auto& candidate : track->clips)
+    {
+        if (auto* audio = std::get_if<AudioClip> (&candidate); audio != nullptr && audio->id == clipId)
+            return &audio->envelope;
+
+        if (auto* midi = std::get_if<MidiClip> (&candidate); midi != nullptr && midi->id == clipId)
+            return &midi->envelope;
+    }
+
+    for (auto& slot : track->session)
+    {
+        if (auto* audio = std::get_if<AudioClip> (&slot.clip); audio != nullptr && audio->id == clipId)
+            return &audio->envelope;
+
+        if (auto* midi = std::get_if<MidiClip> (&slot.clip); midi != nullptr && midi->id == clipId)
+            return &midi->envelope;
+    }
+
+    return nullptr;
+}
+
+} // namespace
+
+SetClipEnvelopeCommand::SetClipEnvelopeCommand (std::string trackId, std::string clipId, std::vector<AutomationPoint> envelope)
+    : trackId_ (std::move (trackId)), clipId_ (std::move (clipId)), next_ (std::move (envelope))
+{
+}
+
+void SetClipEnvelopeCommand::apply (Project& project)
+{
+    auto* envelope = findEnvelope (project, trackId_, clipId_);
+    applied_ = envelope != nullptr;
+
+    if (! applied_)
+        return;
+
+    previous_ = *envelope;
+    *envelope = next_;
+}
+
+void SetClipEnvelopeCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    if (auto* envelope = findEnvelope (project, trackId_, clipId_))
+        *envelope = previous_;
+}
+
+const char* SetClipEnvelopeCommand::name() const { return "Clip Envelope"; }
+
+RecordSessionSlotCommand::RecordSessionSlotCommand (std::string trackId, int scene, Clip clip)
+    : trackId_ (std::move (trackId)), scene_ (std::clamp (scene, 0, kSessionScenes - 1)), next_ (std::move (clip))
+{
+}
+
+void RecordSessionSlotCommand::apply (Project& project)
+{
+    auto* track = findTrack (project, trackId_);
+    applied_ = track != nullptr;
+
+    if (! applied_)
+        return;
+
+    hadPrevious_ = false;
+
+    for (const auto& slot : track->session)
+    {
+        if (slot.scene != scene_)
+            continue;
+
+        previous_ = slot;
+        hadPrevious_ = true;
+        break;
+    }
+
+    recordIntoSessionSlot (*track, scene_, next_);
+}
+
+void RecordSessionSlotCommand::revert (Project& project)
+{
+    if (! applied_)
+        return;
+
+    auto* track = findTrack (project, trackId_);
+
+    if (track == nullptr)
+        return;
+
+    track->session.erase (std::remove_if (track->session.begin(), track->session.end(),
+                                          [&] (const SessionSlot& slot) { return slot.scene == scene_; }),
+                          track->session.end());
+
+    if (hadPrevious_)
+        track->session.push_back (previous_);
+}
+
+const char* RecordSessionSlotCommand::name() const { return "Record Session Slot"; }
 
 const char* SetClipMarkersCommand::name() const { return "Clip Markers"; }
 
