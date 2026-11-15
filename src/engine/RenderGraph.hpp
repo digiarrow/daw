@@ -17,6 +17,8 @@
 namespace waveform
 {
 
+class WorkerPool;
+
 struct RenderClip
 {
     std::shared_ptr<const ClipAudio> audio;
@@ -90,6 +92,9 @@ struct RenderTrack
     std::vector<MidiEffect> midiEffects;
     DrumRack drumRack;
     int sidechainTrack = -1;
+    int crossfaderSide = 0;
+    int inputPair = 0;
+    int outputPair = 0;
     float gain = 1.0f;
     float gainDb = 0.0f;
     float pan = 0.0f;
@@ -163,6 +168,7 @@ struct RenderGraph
     float masterGain = 1.0f;
     double projectTempo = 120.0;
     double sceneTempoBpm[kSessionScenes] {};
+    float crossfader = 0.0f;
 };
 
 struct GraphBuildResult
@@ -214,6 +220,7 @@ void renderLinearBlock (const RenderGraph* graph,
                         int sessionCount = 0,
                         ExternalInsert* external = nullptr,
                         double* lfoPhase = nullptr,
-                        float* trackPeaks = nullptr) noexcept;
+                        float* trackPeaks = nullptr,
+                        WorkerPool* workers = nullptr) noexcept;
 
 } // namespace waveform

@@ -35,6 +35,7 @@ public:
     void paint (juce::Graphics& graphics) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress& key) override;
+    bool keyStateChanged (bool isKeyDown) override;
 
 private:
     class TrackRow;
@@ -200,6 +201,8 @@ private:
     std::string selectedTrackId_;
     std::string selectedClipId_;
     std::string automationParameter_ { "mixer.gainDb" };
+    int keyboardOctave_ = 4;
+    int heldTypingNote_ = -1;
     int selectedScene_ = -1;
     std::string peakSignature_;
     std::unordered_map<std::string, std::vector<float>> clipPeaks_;

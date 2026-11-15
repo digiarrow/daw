@@ -110,6 +110,8 @@ else()
     message(STATUS "ASIO disabled (WASAPI is the Windows backend)")
 endif()
 
+find_package(Threads REQUIRED)
+
 add_library(waveform_core STATIC
     src/core/src/automation.cpp
     src/core/src/clips.cpp
@@ -127,6 +129,7 @@ add_library(waveform_core STATIC
     src/core/src/mix.cpp
     src/core/src/synth.cpp
     src/core/src/paths.cpp
+    src/core/src/phase8.cpp
     src/core/src/project.cpp
     src/core/src/serialize.cpp
     src/core/src/stretch.cpp
@@ -139,7 +142,7 @@ target_include_directories(waveform_core PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/signalsmith-stretch/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/signalsmith-linear/include"
 )
-target_link_libraries(waveform_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(waveform_core PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
 target_compile_features(waveform_core PUBLIC cxx_std_20)
 
 if(APPLE)
@@ -233,6 +236,7 @@ if(WAVEFORM_BUILD_TESTS)
         tests/test_clips.cpp
         tests/test_phase6.cpp
         tests/test_phase7.cpp
+        tests/test_phase8.cpp
         tests/test_effects.cpp
         tests/test_later.cpp
         tests/test_midi_effects.cpp

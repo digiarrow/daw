@@ -6,6 +6,7 @@
 #include "waveform/midi_effects.hpp"
 #include "waveform/mix.hpp"
 #include "waveform/paths.hpp"
+#include "waveform/phase8.hpp"
 #include "waveform/routing.hpp"
 #include "waveform/later.hpp"
 #include "waveform/sampler.hpp"
@@ -179,6 +180,7 @@ GraphBuildResult buildGraph (const Project& project,
     auto graph = std::make_shared<RenderGraph>();
     graph->masterGain = dbToLinear (project.master.gainDb);
     graph->projectTempo = project.tempoBpm;
+    graph->crossfader = project.crossfader;
 
     for (int scene = 0; scene < kSessionScenes; ++scene)
         graph->sceneTempoBpm[scene] = project.sceneTempoBpm[scene];
@@ -194,6 +196,9 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.midiEffects = track.midiEffects;
         rendered.drumRack = track.drumRack;
         rendered.sidechainTrack = track.sidechainTrack;
+        rendered.crossfaderSide = track.crossfaderSide;
+        rendered.inputPair = track.inputPair;
+        rendered.outputPair = track.outputPair;
 
         for (const auto& zone : track.samplerZones)
         {
@@ -532,7 +537,120 @@ void renderTrackInstrument (const RenderTrack& track,
         return;
     }
 
+    if (track.instrument == InstrumentKind::Wavetable)
+    {
+        float table[256];
+        fillWavetable (table, 256, std::clamp (static_cast<float> (track.patch.resonance), 0.0f, 1.0f));
+
+        for (int index = 0; index < noteCount; ++index)
+        {
+            const SoundingNote& note = notes[index];
+
+            if (note.note < 0 || note.note > 127 || note.velocity <= 0)
+                continue;
+
+            const double frequency = 440.0 * std::pow (2.0, (static_cast<double> (note.note) - 69.0) / 12.0);
+            const float velocity = static_cast<float> (std::clamp (note.velocity, 1, 127)) / 127.0f;
+            const int first = std::clamp (static_cast<int> (std::floor (note.onsetSeconds * sampleRate)), 0, frames);
+            const int last = std::clamp (static_cast<int> (std::ceil (note.releaseSeconds * sampleRate)), 0, frames);
+            double phase = 0.0;
+
+            for (int frame = first; frame < last; ++frame)
+            {
+                const float sample = wavetableSample (table, 256, phase) * velocity * 0.2f;
+                left[frame] += sample * leftGain;
+                right[frame] += sample * rightGain;
+                phase += frequency / sampleRate;
+            }
+        }
+
+        return;
+    }
+
     renderSynthNotes (notes, noteCount, frames, sampleRate, track.patch, memory, leftGain, rightGain, left, right, cutoff, startQuarter, tempoBpm);
+}
+
+struct ParallelMix
+{
+    TrackMix* tracks = nullptr;
+    const RenderGraph* graph = nullptr;
+    BlockScratch* scratch = nullptr;
+    SynthSchedule* synth = nullptr;
+    SessionVoice* session = nullptr;
+    int sessionCount = 0;
+    double sampleRate = 48000.0;
+    double tempoBpm = 120.0;
+    std::int64_t timelineStart = 0;
+    int frames = 0;
+    std::atomic<int>* overflowFlag = nullptr;
+};
+
+void mixTrackInParallel (void* raw, int index)
+{
+    auto& job = *static_cast<ParallelMix*> (raw);
+
+    if (job.scratch->trackLeft[index] == nullptr || job.scratch->trackRight[index] == nullptr)
+        return;
+
+    const auto& source = job.graph->tracks[static_cast<std::size_t> (index)];
+    auto saved = job.tracks[index];
+    job.tracks[index].gain = 1.0f;
+    job.tracks[index].pan = 0.0f;
+    job.tracks[index].mute = false;
+    job.tracks[index].solo = false;
+    MixView one;
+    one.tracks = &job.tracks[index];
+    one.trackCount = 1;
+    one.masterGain = 1.0f;
+    mixBlock (one, job.timelineStart, job.frames, job.scratch->trackLeft[index], job.scratch->trackRight[index]);
+    job.tracks[index] = saved;
+
+    if (job.synth != nullptr && job.synth->memories != nullptr && source.isMidi && index < job.synth->memoryCount)
+    {
+        SoundingNote sounding[128];
+        bool overflow = false;
+        int noteCount = collectTrackNotes (source, index, job.session, job.sessionCount, job.timelineStart, job.frames,
+                                           job.sampleRate, job.tempoBpm, sounding, 128, overflow);
+
+        if (overflow && job.overflowFlag != nullptr)
+            job.overflowFlag->store (1, std::memory_order_relaxed);
+
+        const bool arrangement = job.session == nullptr || index >= job.sessionCount || job.session[index].active < 0;
+
+        if (arrangement)
+            noteCount = appendShapedLive (source, job.synth, index, job.tempoBpm, sounding, noteCount, 128);
+
+        const AutomationLane* cutoffLane = nullptr;
+
+        for (const auto& lane : source.automation)
+            if (lane.parameter == "synth.cutoffHz" && ! lane.points.empty())
+                cutoffLane = &lane;
+
+        const double blockQuarter = Timing::quarterNotesFromSamples (job.timelineStart, job.sampleRate, job.tempoBpm);
+        renderTrackInstrument (source, sounding, noteCount, job.frames, job.sampleRate, job.synth->memories[index],
+                              1.0f, 1.0f, job.scratch->trackLeft[index], job.scratch->trackRight[index],
+                              index, cutoffLane, blockQuarter, job.tempoBpm);
+    }
+
+    if (job.scratch->effects != nullptr && source.sidechainTrack < 0)
+    {
+        bool effectLane = false;
+
+        for (const auto& lane : source.automation)
+            if (! lane.points.empty() && bindAutomationParameter (lane.parameter.c_str()).kind == AutomationKind::Effect)
+                effectLane = true;
+
+        const double blockQuarter = Timing::quarterNotesFromSamples (job.timelineStart, job.sampleRate, job.tempoBpm);
+
+        if (effectLane)
+            processAutomatedInserts (source.effects, source.effectCount, job.scratch->effects + index * kMaxInserts,
+                                     job.scratch->trackLeft[index], job.scratch->trackRight[index], job.frames, job.sampleRate,
+                                     nullptr, nullptr, source.automation.data(), static_cast<int> (source.automation.size()),
+                                     blockQuarter, job.tempoBpm);
+        else
+            processInserts (source.effects, source.effectCount, job.scratch->effects + index * kMaxInserts,
+                            job.scratch->trackLeft[index], job.scratch->trackRight[index], job.frames, job.sampleRate, nullptr, nullptr);
+    }
 }
 
 void renderLinearBlock (const RenderGraph* graph,
@@ -553,7 +671,8 @@ void renderLinearBlock (const RenderGraph* graph,
                         int sessionCount,
                         ExternalInsert* external,
                         double* lfoPhase,
-                        float* trackPeaks) noexcept
+                        float* trackPeaks,
+                        WorkerPool* workers) noexcept
 {
     if (left == nullptr || right == nullptr || frames <= 0)
         return;
@@ -671,6 +790,42 @@ void renderLinearBlock (const RenderGraph* graph,
         RouteEndpoint endpoints[kMaxRouteTracks];
         const int count = std::min (trackCount, kMaxRouteTracks);
         int busCount = 1;
+        bool premixed = false;
+        bool parallelSafe = workers != nullptr && workers->threadCount() > 1 && external == nullptr;
+
+        if (parallelSafe)
+        {
+            for (int index = 0; index < count && index < static_cast<int> (graph->tracks.size()); ++index)
+            {
+                const auto& source = graph->tracks[static_cast<std::size_t> (index)];
+
+                if (source.sidechainTrack >= 0 || source.group || ! source.chains.empty() || source.outputPair > 0)
+                    parallelSafe = false;
+            }
+        }
+
+        std::atomic<int> parallelOverflow { 0 };
+
+        if (parallelSafe)
+        {
+            ParallelMix job;
+            job.tracks = tracks;
+            job.graph = graph;
+            job.scratch = scratch;
+            job.synth = synth;
+            job.session = session;
+            job.sessionCount = sessionCount;
+            job.sampleRate = sampleRate;
+            job.tempoBpm = tempoBpm;
+            job.timelineStart = timelineStart;
+            job.frames = frames;
+            job.overflowFlag = &parallelOverflow;
+            workers->parallel (count, mixTrackInParallel, &job);
+            premixed = true;
+
+            if (parallelOverflow.load (std::memory_order_relaxed) != 0)
+                overflow = true;
+        }
 
         for (int index = 0; index < count; ++index)
         {
@@ -681,6 +836,9 @@ void renderLinearBlock (const RenderGraph* graph,
             }
 
             const auto& source = graph->tracks[static_cast<std::size_t> (index)];
+
+            if (! premixed)
+            {
             auto saved = tracks[index];
             tracks[index].gain = 1.0f;
             tracks[index].pan = 0.0f;
@@ -744,6 +902,9 @@ void renderLinearBlock (const RenderGraph* graph,
                     processInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
                                     scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate, sideLeft, sideRight);
             }
+            }
+
+            auto saved = tracks[index];
 
             if (external != nullptr && external->process != nullptr)
                 external->process (external->context, index, scratch->trackLeft[index], scratch->trackRight[index], frames);
@@ -834,8 +995,13 @@ void renderLinearBlock (const RenderGraph* graph,
                     if (lfoPhase != nullptr && source.modulator.enabled && source.modulator.target == "mixer.gainDb")
                         lfo = static_cast<float> (std::sin (lfoPhase[index]) * source.modulator.depth);
 
+                    const float crossfade = crossfaderLevel (source.crossfaderSide == 1 ? CrossfaderSide::A
+                                                                               : source.crossfaderSide == 2 ? CrossfaderSide::B
+                                                                                                            : CrossfaderSide::None,
+                                                            graph->crossfader);
+
                     for (int sample = 0; sample < slice; ++sample)
-                        gain[sample] = dbToLinear (static_cast<double> (gain[sample]) + static_cast<double> (lfo));
+                        gain[sample] = dbToLinear (static_cast<double> (gain[sample]) + static_cast<double> (lfo)) * crossfade;
 
                     if (panLane != nullptr && tempoBpm > 0.0)
                         writeAutomation (*panLane, startQuarter, slice, sampleRate, tempoBpm, pan, source.pan);

@@ -2,6 +2,7 @@
 
 #include "PluginHost.hpp"
 #include "RenderGraph.hpp"
+#include "waveform/phase8.hpp"
 #include "waveform/queue.hpp"
 #include "waveform/session.hpp"
 #include "waveform/synth.hpp"
@@ -113,6 +114,8 @@ public:
     bool releaseSession (int trackIndex);
     /// Plays a short stereo buffer through the open device. Message thread only.
     void playPreview (std::vector<float> left, std::vector<float> right);
+    void typingNote (int note, bool down);
+    [[nodiscard]] int takeMidiClockPulses() noexcept;
     [[nodiscard]] int sessionScene (int trackIndex) const noexcept;
     [[nodiscard]] int sessionPending (int trackIndex) const noexcept;
     [[nodiscard]] int controlEpoch() const noexcept;
@@ -235,6 +238,11 @@ private:
     std::atomic<int> publishedMidi_ { 0 };
     double sceneTempoApplied_ = 0.0;
     double tempoBeforeScene_ = 0.0;
+    double midiClockPhase_ = 0.0;
+    std::atomic<int> midiClockPulses_ { 0 };
+    std::unique_ptr<WorkerPool> workers_;
+    int midiClockInCount_ = 0;
+    double midiClockInStart_ = 0.0;
     std::vector<float> previewLeft_;
     std::vector<float> previewRight_;
     std::atomic<int> previewFrames_ { 0 };

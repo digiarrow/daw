@@ -44,6 +44,22 @@ Warp playback uses Signalsmith Stretch. Comp segments switch takes. The rack edi
 
 Key tools, MPE slide, and a volume LFO are in the window.
 
+## Phase 5 — partial
+
+- [done] Multicore playback. Independent tracks (no sidechain, group, rack, or extra output pair) mix, render their instrument, and run inserts on a worker pool. The pool is created when the device starts.
+- [done] Time-signature changes. T stores a meter at the playhead and the transport adopts it. `signatureAt` resolves the meter for a quarter note.
+- [done] Bounce and crossfade. F freezes the selected audio clip to a WAV with its gain and fades printed in. C sets an equal-power crossfade between that clip and the next one.
+- [done] Overdub and punch. A take recorded while a MIDI clip is selected is merged into that clip. P punches using the loop region.
+- [done] Crossfader, resampling, and track I/O. B assigns A or B. `-` and `=` move the crossfader. `resampleLinear` converts an input rate. Recording reads the track's input pair when the device has those channels.
+- [done] More devices. Auto filter, phaser, flanger, gate, glue compressor, redux, and a spectrum analyzer are inserts. The instrument menu adds a wavetable voice.
+- [done] Computer keyboard, MIDI map, and MIDI clock. Shift plus the typing row plays notes. Learn maps a CC to the current automation lane. The transport emits 24 clocks per quarter, and an incoming clock sets the tempo.
+- [done] Browser search. The box matches file names and tags from `tags.txt`.
+- [skipped] MP3 and AAC export. No permissive encoder is vendored. LAME is LGPL and the common AAC encoders are not permissive, so export stays WAV.
+
+### Phase 5 status
+
+Parallel track rendering, signature changes, freeze, crossfade, overdub, punch, the crossfader, the new inserts, the wavetable, typing keys, MIDI map and clock, and browser tags are in. Lossy export waits on a permissive encoder.
+
 ## Phase 4 — partial
 
 - [done] FM oscillator, a simple drum voice (`fmSample`, `drumSample`), and a drum rack (pads, per-pad chains, choke groups, one voice pool per drum track, no block-length cap), beside the existing synth, sampler, chorus, and saturator. The compressor can key from another track.

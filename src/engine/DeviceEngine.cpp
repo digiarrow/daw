@@ -1,6 +1,7 @@
 #include "DeviceEngine.hpp"
 
 #include "waveform/automation.hpp"
+#include "waveform/phase8.hpp"
 #include "waveform/midi.hpp"
 #include "waveform/mix.hpp"
 #include "waveform/session.hpp"
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 namespace waveform
@@ -204,6 +206,21 @@ void DeviceEngine::prepareAudioCapture (double maxSeconds)
     }
 
     recordCapacity_ = static_cast<int> (recordLeft_.size());
+}
+
+void DeviceEngine::typingNote (int note, bool down)
+{
+    if (note < 0 || note > 127)
+        return;
+
+    const auto message = down ? juce::MidiMessage::noteOn (1, note, static_cast<juce::uint8> (100))
+                              : juce::MidiMessage::noteOff (1, note);
+    midiCollector_.addMessageToQueue (message);
+}
+
+int DeviceEngine::takeMidiClockPulses() noexcept
+{
+    return midiClockPulses_.exchange (0, std::memory_order_relaxed);
 }
 
 void DeviceEngine::playPreview (std::vector<float> left, std::vector<float> right)
@@ -454,6 +471,25 @@ AudioTake DeviceEngine::copyAudioTake() const
 
 void DeviceEngine::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
+    if (message.isMidiClock())
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+
+        if (midiClockInCount_ == 0)
+            midiClockInStart_ = now;
+
+        ++midiClockInCount_;
+
+        if (midiClockInCount_ >= 24)
+        {
+            const double bpm = bpmFromMidiClocks (midiClockInCount_, now - midiClockInStart_);
+            midiClockInCount_ = 0;
+
+            if (bpm > 0.0)
+                setTempo (bpm);
+        }
+    }
+
     if (message.isController())
     {
         lastController_.store (message.getControllerNumber(), std::memory_order_relaxed);
@@ -878,6 +914,13 @@ void DeviceEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     const int block = device != nullptr ? device->getCurrentBufferSizeSamples() : 0;
     transport_.setSampleRate (rate > 0.0 ? rate : 48000.0);
 
+    if (workers_ == nullptr)
+    {
+        int threads = static_cast<int> (std::thread::hardware_concurrency());
+        threads = std::clamp (threads > 0 ? threads - 1 : 1, 1, 4);
+        workers_ = std::make_unique<WorkerPool> (threads);
+    }
+
     const int scratch = std::max (block, 4096);
     scratchLeft_.assign (static_cast<std::size_t> (scratch), 0.0f);
     scratchRight_.assign (static_cast<std::size_t> (scratch), 0.0f);
@@ -1100,12 +1143,17 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
                         if (piece <= 0)
                             break;
 
+                        const int clocks = midiClocksInBlock (tempo, rate, piece, midiClockPhase_);
+
+                        if (clocks > 0)
+                            midiClockPulses_.fetch_add (clocks, std::memory_order_relaxed);
+
                         renderLinearBlock (graph, rate, tempo, signature, start + local, piece,
                                            left + offset + local, right + offset + local,
                                            metronome_, false, nullptr, &structureOverflow_, &schedule,
                                            frames <= scratchFrames_ ? &blockScratch_ : nullptr,
                                            session_.data(), static_cast<int> (session_.size()),
-                                           externalPtr, lfoPhase_.data(), trackPeaks);
+                                           externalPtr, lfoPhase_.data(), trackPeaks, workers_.get());
                         local += piece;
                     }
 
@@ -1123,8 +1171,15 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
             {
                 const int space = recordCapacity_ - recordWrite_;
                 const int count = std::min (remain, space);
-                const float* inLeft = inputChannelData[0];
-                const float* inRight = numInputChannels > 1 ? inputChannelData[1] : inLeft;
+                int inputPair = 0;
+
+                if (graph != nullptr && recordTrack_ >= 0 && recordTrack_ < static_cast<int> (graph->tracks.size()))
+                    inputPair = graph->tracks[static_cast<std::size_t> (recordTrack_)].inputPair;
+
+                const int leftChannel = hardwareChannel (inputPair, 0, numInputChannels);
+                const int rightChannel = hardwareChannel (inputPair, 1, numInputChannels);
+                const float* inLeft = leftChannel >= 0 ? inputChannelData[leftChannel] : nullptr;
+                const float* inRight = rightChannel >= 0 ? inputChannelData[rightChannel] : inLeft;
 
                 if (inLeft != nullptr)
                 {

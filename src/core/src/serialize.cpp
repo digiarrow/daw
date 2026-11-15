@@ -517,6 +517,8 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
             track.instrument = InstrumentKind::Fm;
         else if (name == "drum")
             track.instrument = InstrumentKind::Drum;
+        else if (name == "wavetable")
+            track.instrument = InstrumentKind::Wavetable;
     }
 
     if (node.contains ("zones") && node.at ("zones").is_array())
@@ -549,6 +551,15 @@ Track trackFromJson (const json& node, std::unordered_set<std::string>& ids)
 
     if (node.contains ("sidechain"))
         track.sidechainTrack = requireInt (node, "sidechain");
+
+    if (node.contains ("crossfaderSide"))
+        track.crossfaderSide = std::clamp (requireInt (node, "crossfaderSide"), 0, 2);
+
+    if (node.contains ("inputPair"))
+        track.inputPair = std::max (0, requireInt (node, "inputPair"));
+
+    if (node.contains ("outputPair"))
+        track.outputPair = std::max (0, requireInt (node, "outputPair"));
 
     if (node.contains ("drumRack") && node.at ("drumRack").is_array())
     {
@@ -905,6 +916,8 @@ json trackToJson (const Track& track)
         instrument = "fm";
     else if (track.instrument == InstrumentKind::Drum)
         instrument = "drum";
+    else if (track.instrument == InstrumentKind::Wavetable)
+        instrument = "wavetable";
 
     trackJson["instrument"] = instrument;
     json zones = json::array();
@@ -936,6 +949,15 @@ json trackToJson (const Track& track)
 
     if (track.sidechainTrack >= 0)
         trackJson["sidechain"] = track.sidechainTrack;
+
+    if (track.crossfaderSide != 0)
+        trackJson["crossfaderSide"] = track.crossfaderSide;
+
+    if (track.inputPair != 0)
+        trackJson["inputPair"] = track.inputPair;
+
+    if (track.outputPair != 0)
+        trackJson["outputPair"] = track.outputPair;
 
     if (track.drumRack.count > 0)
     {
@@ -1003,6 +1025,34 @@ std::string projectToJson (const Project& project)
         { "version", kProjectFormatVersion },
         { "countInBars", project.countInBars }
     };
+
+    if (project.punchEnabled)
+    {
+        document["punch"] = json {
+            { "enabled", true },
+            { "end", project.punchEndQuarter },
+            { "start", project.punchStartQuarter }
+        };
+    }
+
+    if (project.crossfader != 0.0f)
+        document["crossfader"] = project.crossfader;
+
+    if (! project.signatures.empty())
+    {
+        json signatures = json::array();
+
+        for (const auto& point : project.signatures)
+        {
+            signatures.push_back (json {
+                { "denominator", point.signature.denominator },
+                { "numerator", point.signature.numerator },
+                { "quarter", point.quarterNotes }
+            });
+        }
+
+        document["signatures"] = std::move (signatures);
+    }
 
     bool customSceneTempo = false;
 
@@ -1073,6 +1123,31 @@ std::optional<Project> projectFromJson (std::string_view text, std::string* erro
 
         if (document.contains ("countInBars"))
             project.countInBars = std::clamp (requireInt (document, "countInBars"), 0, 8);
+
+        if (document.contains ("punch") && document.at ("punch").is_object())
+        {
+            const auto& punch = document.at ("punch");
+            project.punchEnabled = requireBool (punch, "enabled");
+            project.punchStartQuarter = requireNumber (punch, "start");
+            project.punchEndQuarter = requireNumber (punch, "end");
+        }
+
+        if (document.contains ("crossfader"))
+            project.crossfader = static_cast<float> (std::clamp (requireNumber (document, "crossfader"), 0.0, 1.0));
+
+        if (document.contains ("signatures") && document.at ("signatures").is_array())
+        {
+            for (const auto& point : document.at ("signatures"))
+            {
+                SignaturePoint signature;
+                signature.quarterNotes = requireNumber (point, "quarter");
+                signature.signature.numerator = requireInt (point, "numerator");
+                signature.signature.denominator = requireInt (point, "denominator");
+
+                if (signature.signature.isValid())
+                    project.signatures.push_back (signature);
+            }
+        }
 
         if (document.contains ("sceneTempo") && document.at ("sceneTempo").is_array())
         {
