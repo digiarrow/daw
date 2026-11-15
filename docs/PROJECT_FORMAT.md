@@ -65,7 +65,7 @@ A MIDI track may include a `synth` object for the built-in instrument. If it is 
 
 Clips live in `tracks[].clips` in timeline order. Each clip has a `type`.
 
-Audio clips are **not warped**. The file plays at its recorded speed. `startQuarterNotes` is where the clip sits on the musical timeline. `offsetSeconds` and `lengthSeconds` choose a region of the source. The clip's length in beats changes when the tempo changes, because one second of audio is fewer beats at a higher tempo. Time-stretch is a later phase and will be a separate mode.
+`startQuarterNotes` is where the clip sits on the musical timeline. `offsetSeconds` and `lengthSeconds` choose a region of the source. Without warp markers the file plays at its recorded speed, so its length in beats changes with the tempo. `warp` markers map source seconds to timeline quarters. `warpMode` is `0` (beats), `1` (tones), or `2` (complex, the default, omitted from the file). `envelope` is optional clip-local automation: `position` is seconds on an audio clip and quarter notes on a MIDI clip.
 
 ```json
 {
@@ -111,4 +111,4 @@ Every track and clip `id` is a non-empty string and must be unique in the file. 
 
 ## What this version does not store
 
-Device setup, undo history, plugin state, automation, routing, warp markers, or session-grid slots. Those can be added under new keys or a later `version`.
+Device setup and undo history. The file does store plugin identifiers and state, automation lanes, routing, warp markers, session slots (launch mode, follow action, repeat), a drum rack, a compressor sidechain source, and per-scene tempos when those differ from the defaults. Optional keys are omitted when they hold the default, so an older file still loads.

@@ -206,7 +206,19 @@ void DeviceEngine::prepareAudioCapture (double maxSeconds)
     recordCapacity_ = static_cast<int> (recordLeft_.size());
 }
 
-bool DeviceEngine::launchSession (int trackIndex, int scene, int quantize)
+void DeviceEngine::playPreview (std::vector<float> left, std::vector<float> right)
+{
+    previewFrames_.store (0, std::memory_order_release);
+    const int frames = static_cast<int> (std::min (left.size(), right.size()));
+    previewLeft_ = std::move (left);
+    previewRight_ = std::move (right);
+    previewLeft_.resize (static_cast<std::size_t> (frames));
+    previewRight_.resize (static_cast<std::size_t> (frames));
+    previewCursor_.store (0, std::memory_order_relaxed);
+    previewFrames_.store (frames, std::memory_order_release);
+}
+
+bool DeviceEngine::launchSession (int trackIndex, int scene, int quantize, int mode, int follow, int afterHundredths, int repeatHundredths)
 {
     if (trackIndex < 0 || trackIndex >= 64 || scene < -1 || scene >= kSessionScenes)
         return false;
@@ -216,6 +228,10 @@ bool DeviceEngine::launchSession (int trackIndex, int scene, int quantize)
     command.a = trackIndex;
     command.b = scene;
     command.c = std::clamp (quantize, 0, 2);
+    command.d = (static_cast<std::int64_t> (std::clamp (mode, 0, 3)) & 0xff)
+              | ((static_cast<std::int64_t> (std::clamp (follow, 0, 5)) & 0xff) << 8)
+              | ((static_cast<std::int64_t> (std::clamp (afterHundredths, 1, 4000)) & 0xffff) << 16)
+              | ((static_cast<std::int64_t> (std::clamp (repeatHundredths, 1, 4000)) & 0xffff) << 32);
     return push (command);
 }
 
@@ -262,6 +278,21 @@ void DeviceEngine::applySession (const EngineCommand& command) noexcept
 
     auto& voice = session_[static_cast<std::size_t> (track)];
     const int quantize = static_cast<int> (command.c);
+
+    voice.launch = static_cast<ClipLaunchMode> (command.d & 0xff);
+    voice.follow = static_cast<FollowActionKind> ((command.d >> 8) & 0xff);
+    voice.followAfterQuarters = static_cast<double> ((command.d >> 16) & 0xffff) / 100.0;
+    voice.repeatQuarters = static_cast<double> ((command.d >> 32) & 0xffff) / 100.0;
+    voice.gateHeld = voice.launch == ClipLaunchMode::Gate;
+
+    if (voice.launch == ClipLaunchMode::Toggle && voice.active == command.b)
+    {
+        voice.pending = -2;
+        voice.active = -1;
+        voice.playhead = 0;
+        voice.gateHeld = false;
+        return;
+    }
 
     if (quantize == 0 || transport_.state() != TransportState::Playing || ! (transport_.sampleRate() > 0.0))
     {
@@ -947,7 +978,45 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
     auto renderFrames = [&] (int frames, float* left, float* right, int inputOffset)
     {
         const double rate = transport_.sampleRate();
-        const double tempo = transport_.tempoBpm();
+        double tempo = transport_.tempoBpm();
+
+        if (graph != nullptr)
+        {
+            int scene = -1;
+
+            for (const auto& voice : session_)
+            {
+                if (voice.active >= 0)
+                {
+                    scene = voice.active;
+                    break;
+                }
+            }
+
+            if (scene >= 0)
+            {
+                const double sceneTempo = tempoForScene (graph->sceneTempoBpm, kSessionScenes, scene, graph->projectTempo);
+
+                if (sceneTempoApplied_ == 0.0)
+                    tempoBeforeScene_ = tempo;
+
+                if (std::abs (sceneTempo - tempo) > 0.05)
+                {
+                    transport_.setTempoBpm (sceneTempo);
+                    tempoMilli_.store (Transport::tempoToMilli (sceneTempo), std::memory_order_relaxed);
+                }
+
+                sceneTempoApplied_ = sceneTempo;
+                tempo = sceneTempo;
+            }
+            else if (sceneTempoApplied_ != 0.0)
+            {
+                transport_.setTempoBpm (tempoBeforeScene_);
+                tempoMilli_.store (Transport::tempoToMilli (tempoBeforeScene_), std::memory_order_relaxed);
+                tempo = tempoBeforeScene_;
+                sceneTempoApplied_ = 0.0;
+            }
+        }
         const auto signature = transport_.timeSignature();
         int done = 0;
 
@@ -1115,6 +1184,27 @@ void DeviceEngine::audioDeviceIOCallbackWithContext (const float* const* inputCh
 
     for (int index = 0; index < 64; ++index)
         storeFloat (trackPeakBits_[static_cast<std::size_t> (index)], trackPeaks[index]);
+
+    const int previewFrames = previewFrames_.load (std::memory_order_acquire);
+    int previewCursor = previewCursor_.load (std::memory_order_relaxed);
+
+    if (previewFrames > 0 && previewCursor < previewFrames && outputChannelData != nullptr && outputChannelData[0] != nullptr)
+    {
+        const int count = std::min (numSamples, previewFrames - previewCursor);
+        const bool stereoOut = numOutputChannels > 1 && outputChannelData[1] != nullptr;
+
+        for (int index = 0; index < count; ++index)
+        {
+            const float leftSample = previewLeft_[static_cast<std::size_t> (previewCursor + index)];
+            const float rightSample = previewRight_[static_cast<std::size_t> (previewCursor + index)];
+            outputChannelData[0][index] += leftSample;
+
+            if (stereoOut)
+                outputChannelData[1][index] += rightSample;
+        }
+
+        previewCursor_.store (previewCursor + count, std::memory_order_relaxed);
+    }
 
     storeFloat (peakLeftBits_, peakLeft);
     storeFloat (peakRightBits_, peakRight);

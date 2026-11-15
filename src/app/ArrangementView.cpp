@@ -38,6 +38,14 @@ void ArrangementView::setState (const waveform::Project* project,
     repaint();
 }
 
+void ArrangementView::setAutomationParameter (std::string parameter)
+{
+    if (! parameter.empty())
+        automationParameter_ = std::move (parameter);
+
+    repaint();
+}
+
 void ArrangementView::setClipPeaks (std::unordered_map<std::string, std::vector<float>> peaks)
 {
     peaks_ = std::move (peaks);
@@ -353,7 +361,7 @@ void ArrangementView::paint (juce::Graphics& graphics)
         graphics.setColour (juce::Colour (0xff18211d));
         graphics.fillRoundedRectangle (lane.toFloat(), 4.0f);
         graphics.setColour (juce::Colour (waveform::StudioLookAndFeel::kDim));
-        graphics.drawText ("Volume", 8, lane.getY(), kNames - 12, lane.getHeight(), juce::Justification::centredLeft);
+        graphics.drawText (automationParameter_, 8, lane.getY(), kNames - 12, lane.getHeight(), juce::Justification::centredLeft);
 
         const waveform::Track* automated = nullptr;
 
@@ -366,7 +374,7 @@ void ArrangementView::paint (juce::Graphics& graphics)
         if (! draggingPoint_ && automated != nullptr)
         {
             for (const auto& candidate : automated->automation)
-                if (candidate.parameter == "mixer.gainDb")
+                if (candidate.parameter == automationParameter_)
                     points = &candidate.points;
         }
 
@@ -425,7 +433,7 @@ void ArrangementView::mouseDown (const juce::MouseEvent& event)
 
         if (automated != nullptr)
             for (const auto& candidate : automated->automation)
-                if (candidate.parameter == "mixer.gainDb")
+                if (candidate.parameter == automationParameter_)
                     automationEdit_ = candidate.points;
 
         const double quarter = std::max (0.0, snapped (quarterAt (event.x)));

@@ -1,5 +1,7 @@
 #include "waveform/mix.hpp"
 
+#include "waveform/automation.hpp"
+
 #include <cmath>
 
 namespace waveform
@@ -49,6 +51,18 @@ void addClip (const AudioClipView& clip,
         {
             const float progress = static_cast<float> (clip.fadeOutFrames - remaining) / static_cast<float> (clip.fadeOutFrames);
             envelope *= std::cos (progress * kHalfPi);
+        }
+
+        if (clip.envelopeCount >= 2 && clip.timelineLengthFrames > 0)
+        {
+            const double local = static_cast<double> (position) / static_cast<double> (clip.timelineLengthFrames);
+            AutomationPoint points[8];
+            const int count = std::min (clip.envelopeCount, 8);
+
+            for (int point = 0; point < count; ++point)
+                points[point] = AutomationPoint { clip.envelopePosition[point], clip.envelopeValue[point] };
+
+            envelope *= static_cast<float> (clipEnvelopeAt (points, count, local, 1.0));
         }
 
         const auto index = static_cast<int> (frame - timelineStart);

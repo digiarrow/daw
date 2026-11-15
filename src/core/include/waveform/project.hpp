@@ -82,6 +82,8 @@ struct AudioClip
     double fadeInSeconds = 0.0;
     double fadeOutSeconds = 0.0;
     std::vector<WarpMarker> warp;
+    std::vector<AutomationPoint> envelope; ///< Clip-local seconds.
+    int warpMode = 2;                      ///< 0 beats, 1 tones, 2 complex.
     std::vector<CompSegment> comp;
     std::vector<ClipTake> takes;
 };
@@ -104,17 +106,58 @@ struct MidiClip
     double startQuarterNotes = 0.0;
     double lengthQuarterNotes = 4.0;
     std::vector<MidiNote> notes;
+    std::vector<AutomationPoint> envelope; ///< Clip-local quarter notes.
 };
 
 using Clip = std::variant<AudioClip, MidiClip>;
 
 inline constexpr int kSessionScenes = 8;
 
+enum class ClipLaunchMode
+{
+    Trigger,
+    Gate,
+    Toggle,
+    Repeat
+};
+
+enum class FollowActionKind
+{
+    None,
+    Stop,
+    Next,
+    Previous,
+    First,
+    Last
+};
+
 /// A clip that lives in the session grid. `scene` is the row, 0 .. kSessionScenes-1.
 struct SessionSlot
 {
     int scene = 0;
     Clip clip;
+    ClipLaunchMode launch = ClipLaunchMode::Trigger;
+    FollowActionKind follow = FollowActionKind::None;
+    double followAfterQuarters = 4.0;
+    double repeatQuarters = 1.0;
+};
+
+struct DrumPad
+{
+    int note = 36;
+    int chokeGroup = 0; ///< 0 does not choke. Pads that share a group silence each other.
+    float gain = 1.0f;
+    float tuneSemitones = 0.0f;
+    EffectSlot chain[2] {};
+    int chainLength = 0;
+};
+
+inline constexpr int kMaxDrumPads = 16;
+
+struct DrumRack
+{
+    DrumPad pads[kMaxDrumPads] {};
+    int count = 0;
 };
 
 struct Send
@@ -246,6 +289,8 @@ struct Track
     std::string pluginState;
     std::vector<PluginInsert> plugins;
     std::vector<MidiEffect> midiEffects; ///< Processors in front of the instrument. MIDI tracks only.
+    int sidechainTrack = -1;             ///< Track index whose output feeds this track's compressor.
+    DrumRack drumRack;
 };
 
 struct Project
@@ -259,6 +304,7 @@ struct Project
     int countInBars = 1;
     MixerState master; ///< Only gainDb is used. Pan, mute, and solo are ignored.
     std::vector<Track> tracks;
+    double sceneTempoBpm[kSessionScenes] {}; ///< 0 keeps the project tempo for that scene.
 
     [[nodiscard]] static Project makeDefault();
 };

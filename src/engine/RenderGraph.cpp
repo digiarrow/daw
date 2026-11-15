@@ -1,5 +1,7 @@
 #include "RenderGraph.hpp"
 
+#include "waveform/automation.hpp"
+#include "waveform/drum_rack.hpp"
 #include "waveform/effects.hpp"
 #include "waveform/midi_effects.hpp"
 #include "waveform/mix.hpp"
@@ -176,6 +178,10 @@ GraphBuildResult buildGraph (const Project& project,
     GraphBuildResult result;
     auto graph = std::make_shared<RenderGraph>();
     graph->masterGain = dbToLinear (project.master.gainDb);
+    graph->projectTempo = project.tempoBpm;
+
+    for (int scene = 0; scene < kSessionScenes; ++scene)
+        graph->sceneTempoBpm[scene] = project.sceneTempoBpm[scene];
 
     for (const auto& track : project.tracks)
     {
@@ -186,6 +192,8 @@ GraphBuildResult buildGraph (const Project& project,
         rendered.instrument = track.instrument;
         rendered.automation = track.automation;
         rendered.midiEffects = track.midiEffects;
+        rendered.drumRack = track.drumRack;
+        rendered.sidechainTrack = track.sidechainTrack;
 
         for (const auto& zone : track.samplerZones)
         {
@@ -299,6 +307,20 @@ GraphBuildResult buildGraph (const Project& project,
                 renderedClip.gain = dbToLinear (clip->gainDb);
                 renderedClip.fadeInSeconds = clip->fadeInSeconds;
                 renderedClip.fadeOutSeconds = clip->fadeOutSeconds;
+                renderedClip.envelopeCount = 0;
+
+                if (clip->lengthSeconds > 0.0)
+                {
+                    const int count = std::min (8, static_cast<int> (clip->envelope.size()));
+
+                    for (int point = 0; point < count; ++point)
+                    {
+                        renderedClip.envelopePosition[point] = clip->envelope[static_cast<std::size_t> (point)].quarterNotes / clip->lengthSeconds;
+                        renderedClip.envelopeValue[point] = clip->envelope[static_cast<std::size_t> (point)].value;
+                    }
+
+                    renderedClip.envelopeCount = count;
+                }
 
                 if (clip->warp.size() >= 2 || ! clip->comp.empty())
                 {
@@ -340,7 +362,8 @@ GraphBuildResult buildGraph (const Project& project,
                     std::vector<float> bakedRight;
                     const double secondsPerQuarter = 60.0 / std::max (1.0, project.tempoBpm);
                     renderStretch (primary, extrasStorage, extraCount, clip->warp, clip->comp, sampleRate, secondsPerQuarter,
-                                   clip->offsetSeconds, clip->lengthSeconds, bakedLeft, bakedRight);
+                                   clip->offsetSeconds, clip->lengthSeconds, bakedLeft, bakedRight,
+                                   static_cast<WarpMode> (std::clamp (clip->warpMode, 0, 2)));
 
                     if (! bakedLeft.empty())
                     {
@@ -465,6 +488,33 @@ void renderTrackInstrument (const RenderTrack& track,
 
     if (track.instrument == InstrumentKind::Drum)
     {
+        if (track.drumRack.count > 0)
+        {
+            static PadVoice voices[64][4] {};
+            static int counts[64] {};
+            const int slot = 0;
+
+            for (int index = 0; index < noteCount; ++index)
+                if (notes[index].onsetSeconds >= -1.0e-4 && notes[index].onsetSeconds < static_cast<double> (frames) / sampleRate)
+                    strikeDrumRack (voices[slot], 4, track.drumRack, notes[index].note);
+
+            float rackLeft[2048];
+            float rackRight[2048];
+            const int limited = std::min (frames, 2048);
+            std::fill (rackLeft, rackLeft + limited, 0.0f);
+            std::fill (rackRight, rackRight + limited, 0.0f);
+            renderDrumRack (voices[slot], 4, track.drumRack, limited, sampleRate, rackLeft, rackRight);
+            counts[slot] = 4;
+
+            for (int index = 0; index < limited; ++index)
+            {
+                left[index] += rackLeft[index] * leftGain;
+                right[index] += rackRight[index] * rightGain;
+            }
+
+            return;
+        }
+
         renderDrumNotes (notes, noteCount, frames, sampleRate, track.patch, leftGain, rightGain, left, right);
         return;
     }
@@ -585,6 +635,14 @@ void renderLinearBlock (const RenderGraph* graph,
                     view.timelineLengthFrames = std::max<std::int64_t> (0, std::llround (clip.lengthSeconds * clip.audio->sampleRate));
                     view.fadeInFrames = std::max<std::int64_t> (0, std::llround (clip.fadeInSeconds * sampleRate));
                     view.fadeOutFrames = std::max<std::int64_t> (0, std::llround (clip.fadeOutSeconds * sampleRate));
+                    view.envelopeCount = std::min (8, clip.envelopeCount);
+
+                    for (int point = 0; point < view.envelopeCount; ++point)
+                    {
+                        view.envelopePosition[point] = clip.envelopePosition[point];
+                        view.envelopeValue[point] = clip.envelopeValue[point];
+                    }
+
                     view.gain = clip.gain;
                 }
             }
@@ -675,8 +733,38 @@ void renderLinearBlock (const RenderGraph* graph,
             }
 
             if (scratch->effects != nullptr)
+            {
+                const float* sideLeft = nullptr;
+                const float* sideRight = nullptr;
+
+                if (source.sidechainTrack >= 0 && source.sidechainTrack < kMaxRouteTracks
+                    && scratch->trackLeft[source.sidechainTrack] != nullptr)
+                {
+                    sideLeft = scratch->trackLeft[source.sidechainTrack];
+                    sideRight = scratch->trackRight[source.sidechainTrack];
+                }
+
+                float automation[2048];
+                const int automatedFrames = std::min (frames, 2048);
+
+                for (const auto& lane : source.automation)
+                {
+                    if (lane.parameter != "mixer.gainDb" || lane.points.empty() || ! (tempoBpm > 0.0))
+                        continue;
+
+                    const double startQuarter = Timing::quarterNotesFromSamples (timelineStart, sampleRate, tempoBpm);
+                    writeAutomation (lane, startQuarter, automatedFrames, sampleRate, tempoBpm, automation, source.gainDb);
+
+                    for (int sample = 0; sample < automatedFrames; ++sample)
+                        automation[sample] = dbToLinear (automation[sample]);
+
+                    applyGainCurve (scratch->trackLeft[index], scratch->trackRight[index], automation, automatedFrames);
+                    break;
+                }
+
                 processInserts (source.effects, source.effectCount, scratch->effects + index * kMaxInserts,
-                                scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate);
+                                scratch->trackLeft[index], scratch->trackRight[index], frames, sampleRate, sideLeft, sideRight);
+            }
 
             if (external != nullptr && external->process != nullptr)
                 external->process (external->context, index, scratch->trackLeft[index], scratch->trackRight[index], frames);
@@ -797,10 +885,32 @@ void renderLinearBlock (const RenderGraph* graph,
             else if (slot.used)
                 loop = std::max<std::int64_t> (0, std::llround (slot.lengthSeconds * sampleRate));
 
+            const double samplesPerQuarter = sampleRate > 0.0 && tempoBpm > 0.0 ? sampleRate * 60.0 / tempoBpm : 0.0;
+            LaunchStep launchStep;
+            launchStep.activeScene = session[index].active;
+            launchStep.playheadQuarters = samplesPerQuarter > 0.0 ? static_cast<double> (session[index].playhead) / samplesPerQuarter : 0.0;
+            launchStep.gateHeld = session[index].gateHeld;
+            launchStep.launch = session[index].launch;
+            launchStep.follow = session[index].follow;
+            launchStep.followAfterQuarters = session[index].followAfterQuarters;
+            launchStep.repeatQuarters = session[index].repeatQuarters;
+            launchStep.pressedScene = session[index].active;
+
             session[index].playhead += frames;
 
             if (loop > 0)
                 session[index].playhead %= loop;
+
+            if (samplesPerQuarter > 0.0)
+            {
+                const auto stepped = stepClipLaunch (launchStep, kSessionScenes, static_cast<double> (frames) / samplesPerQuarter, false, false);
+
+                if (stepped.activeScene != launchStep.activeScene || stepped.retrigger)
+                {
+                    session[index].active = stepped.activeScene;
+                    session[index].playhead = 0;
+                }
+            }
         }
     }
 

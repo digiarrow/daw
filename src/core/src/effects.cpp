@@ -110,7 +110,14 @@ void resetEffect (EffectState& state) noexcept
     state = {};
 }
 
-void processEffect (const EffectSlot& slot, EffectState& state, float* left, float* right, int frames, double sampleRate) noexcept
+void processEffect (const EffectSlot& slot,
+                    EffectState& state,
+                    float* left,
+                    float* right,
+                    int frames,
+                    double sampleRate,
+                    const float* sidechainLeft,
+                    const float* sidechainRight) noexcept
 {
     if (slot.bypass || left == nullptr || right == nullptr || frames <= 0 || ! (sampleRate > 0.0))
         return;
@@ -167,7 +174,11 @@ void processEffect (const EffectSlot& slot, EffectState& state, float* left, flo
 
             for (int i = 0; i < frames; ++i)
             {
-                const float detector = std::max (std::abs (left[i]), std::abs (right[i]));
+                const float program = std::max (std::abs (left[i]), std::abs (right[i]));
+                const float side = sidechainLeft != nullptr
+                                       ? std::max (std::abs (sidechainLeft[i]), sidechainRight != nullptr ? std::abs (sidechainRight[i]) : 0.0f)
+                                       : program;
+                const float detector = side;
                 const float over = detector > threshold && threshold > 0.0f ? detector / threshold : 1.0f;
                 const float target = over > 1.0f ? std::pow (over, 1.0f / ratio - 1.0f) : 1.0f;
                 const float coef = target < state.env ? attack : release;
@@ -298,7 +309,15 @@ void processEffect (const EffectSlot& slot, EffectState& state, float* left, flo
     }
 }
 
-void processInserts (const EffectSlot* slots, int slotCount, EffectState* states, float* left, float* right, int frames, double sampleRate) noexcept
+void processInserts (const EffectSlot* slots,
+                     int slotCount,
+                     EffectState* states,
+                     float* left,
+                     float* right,
+                     int frames,
+                     double sampleRate,
+                     const float* sidechainLeft,
+                     const float* sidechainRight) noexcept
 {
     if (slots == nullptr || states == nullptr)
         return;
@@ -306,7 +325,12 @@ void processInserts (const EffectSlot* slots, int slotCount, EffectState* states
     const int count = std::min (slotCount, kMaxInserts);
 
     for (int index = 0; index < count; ++index)
-        processEffect (slots[index], states[index], left, right, frames, sampleRate);
+    {
+        const bool sidechain = slots[index].kind == EffectKind::Compressor && sidechainLeft != nullptr;
+        processEffect (slots[index], states[index], left, right, frames, sampleRate,
+                       sidechain ? sidechainLeft : nullptr,
+                       sidechain ? sidechainRight : nullptr);
+    }
 }
 
 } // namespace waveform
